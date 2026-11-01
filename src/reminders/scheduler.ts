@@ -29,7 +29,7 @@ export async function askForReminders(): Promise<boolean> {
   return status === 'granted';
 }
 
-/** Replaces every pending reminder with `plan`. Whereabouts schedules nothing else. */
+/** Replaces every pending reminder with `plan`. Clew schedules nothing else. */
 export async function syncReminders(plan: PlannedReminder[]): Promise<void> {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL, {

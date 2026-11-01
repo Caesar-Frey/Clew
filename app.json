@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "Whereabouts",
-    "slug": "whereabouts",
-    "scheme": "whereabouts",
+    "name": "Clew",
+    "slug": "clew",
+    "scheme": "clew",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.whereabouts",
+      "bundleIdentifier": "app.clew",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -20,7 +20,7 @@
       }
     },
     "android": {
-      "package": "app.whereabouts",
+      "package": "app.clew",
       "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#2E4B3B",
@@ -47,7 +47,7 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Whereabouts uses Face ID to unlock the app."
+          "faceIDPermission": "Clew uses Face ID to unlock the app."
         }
       ],
       "@react-native-community/datetimepicker",
@@ -75,16 +75,16 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Whereabouts uses the camera to photograph your things and boxes so you can recognise them later.",
-          "photosPermission": "Whereabouts lets you pick photos of your things.",
+          "cameraPermission": "Clew uses the camera to photograph your things and boxes so you can recognise them later.",
+          "photosPermission": "Clew lets you pick photos of your things.",
           "microphonePermission": false
         }
       ],
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Whereabouts listens when you tap the microphone, so you can add or find things by voice. Audio never leaves your phone.",
-          "speechRecognitionPermission": "Whereabouts turns what you say into a catalog card, on your phone.",
+          "microphonePermission": "Clew listens when you tap the microphone, so you can add or find things by voice. Audio never leaves your phone.",
+          "speechRecognitionPermission": "Clew turns what you say into a catalog card, on your phone.",
           "androidSpeechServicePackages": [
             "com.google.android.as",
             "com.google.android.googlequicksearchbox"

@@ -1,8 +1,10 @@
-# Whereabouts
+# Clew
 
 An app that helps you remember where you put what: in a drawer, under the bed, or with a friend.
 
-Whereabouts is designed like an old library. Every thing gets a catalog card, places are shelves, lending something out gets a date-due stamp, and every move is kept on the card's circulation record.
+A clew is a ball of thread, like the one Ariadne gave Theseus to find his way back out of the labyrinth (it's also where the word "clue" comes from). The app was first called Whereabouts.
+
+Clew is designed like an old library. Every thing gets a catalog card, places are shelves, lending something out gets a date-due stamp, and every move is kept on the card's circulation record.
 
 ## What it does
 
@@ -14,8 +16,8 @@ Whereabouts is designed like an old library. Every thing gets a catalog card, pl
 - **Due-date reminders.** A local notification at 9am on the day something is due back, and again three days later if it's still out. While the app lock is on they don't name the thing or the person.
 - **Photos.** Up to four per card, from the camera or library. Stored inside the encrypted database (re-encoded, so location metadata is stripped), with a small thumbnail for lists.
 - **Voice.** Say "the passport is in the desk drawer" or "I lent the drill to Sam until Friday" and the card fills itself in; ask "where's my passport" from search. Recognition runs on the phone only (English for now). If the phone can't recognise speech offline, the mic says so instead of sending audio anywhere, and Android offers to download its offline speech model.
-- **Which box is this?** Photograph a box, or the label you scribbled on it, and Whereabouts finds it among your boxes. It reads handwriting with the phone's built-in text recognition and compares colours and layout. No QR codes or printing. Each box keeps up to six views.
-- **Backups.** A full copy of the catalog (photos included) sealed with a passphrase (scrypt + AES-256-GCM), saved anywhere through the share sheet and restored on any phone.
+- **Which box is this?** Photograph a box, or the label you scribbled on it, and Clew finds it among your boxes. It reads handwriting with the phone's built-in text recognition and compares colours and layout. No QR codes or printing. Each box keeps up to six views.
+- **Backups.** A full copy of the catalog (photos included) sealed with a passphrase (scrypt + AES-256-GCM), saved anywhere through the share sheet and restored on any phone. Backups are `.clew` files; `.wbk` backups from the Whereabouts days still restore.
 - **Library assistant (optional).** Download an open-weight vision model (SmolVLM2 500M, about 680 MB, or Qwen2.5-VL 3B, about 2.8 GB) and it suggests a name and subjects from a photo, as slips you tap to keep. It also adds "Might be what you mean" to search, using on-device text embeddings (nomic-embed-text v1.5). Runs entirely on the phone through llama.cpp.
 
 ## Privacy and security

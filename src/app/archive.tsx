@@ -183,7 +183,7 @@ function RestoreFlow() {
   return (
     <>
       <T variant="body">
-        Choose a backup file made by Whereabouts, then enter the passphrase it was sealed with. The backup replaces everything on this
+        Choose a backup file made by Clew, then enter the passphrase it was sealed with. The backup replaces everything on this
         phone.
       </T>
       <LibraryButton label={picked ? 'Choose a different file' : 'Choose backup file'} tone={picked ? 'ghost' : 'leather'} onPress={choose} />

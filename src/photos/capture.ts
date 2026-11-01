@@ -17,7 +17,7 @@ const THUMB = 240;
 
 export class CameraPermissionError extends Error {
   constructor() {
-    super('Allow camera access for Whereabouts in Settings to take photos.');
+    super('Allow camera access for Clew in Settings to take photos.');
     this.name = 'CameraPermissionError';
   }
 }

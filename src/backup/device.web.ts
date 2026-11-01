@@ -1,6 +1,6 @@
 import { gcm } from '@noble/ciphers/aes.js';
 
-import type { Aead } from './archive';
+import { ARCHIVE_EXTENSION, type Aead } from './archive';
 
 /** Browser design preview only: a JS cipher and a download link. */
 export const nativeAead: Aead = {
@@ -14,7 +14,7 @@ export async function shareArchive(bytes: Uint8Array): Promise<void> {
   const url = URL.createObjectURL(new Blob([bytes as BlobPart]));
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'Whereabouts.wbk';
+  a.download = `Clew.${ARCHIVE_EXTENSION}`;
   a.click();
   URL.revokeObjectURL(url);
 }

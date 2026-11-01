@@ -1,4 +1,5 @@
 import { gcm } from '@noble/ciphers/aes.js';
+import { scrypt } from '@noble/hashes/scrypt.js';
 import { randomBytes } from 'node:crypto';
 
 import {
@@ -8,6 +9,7 @@ import {
   peekArchive,
   restoreCatalog,
   sealArchive,
+  toHex,
   WrongPassphraseError,
   type Aead,
   type ArchiveDeps,
@@ -70,6 +72,40 @@ describe('archive', () => {
     expect(at).toBeGreaterThan(0);
     edited[at + 8] = '9'.charCodeAt(0);
     await expect(openArchive(edited, 'correct horse battery', deps)).rejects.toBeInstanceOf(WrongPassphraseError);
+  });
+
+  it('still opens backups made when the app was called Whereabouts', async () => {
+    const source = await sampleCatalog();
+    const dump = { ...(await dumpCatalog(source.db, 7)), format: 'whereabouts-catalog' as const };
+    // Built byte for byte the way the Whereabouts builds wrote archives.
+    const salt = new Uint8Array(randomBytes(16));
+    const nonce = new Uint8Array(randomBytes(12));
+    const header = new TextEncoder().encode(
+      JSON.stringify({ app: 'whereabouts', kdf: 'scrypt', N: 1024, r: 8, p: 1, salt: toHex(salt), nonce: toHex(nonce), createdAt: 7, summary: { items: 2, places: 4, photos: 0 } }),
+    );
+    const prefix = new Uint8Array(9 + header.length);
+    prefix.set([0x57, 0x48, 0x42, 0x4b], 0); // "WHBK"
+    prefix[4] = 1;
+    new DataView(prefix.buffer).setUint32(5, header.length);
+    prefix.set(header, 9);
+    const key = scrypt('correct horse battery', salt, { N: 1024, r: 8, p: 1, dkLen: 32 });
+    const body = gcm(key, nonce, prefix).encrypt(new TextEncoder().encode(JSON.stringify(dump)));
+    const legacy = new Uint8Array(prefix.length + body.length);
+    legacy.set(prefix, 0);
+    legacy.set(body, prefix.length);
+
+    expect(peekArchive(legacy).createdAt).toBe(7);
+    const target = await testRepo();
+    await restoreCatalog(target.db, await openArchive(legacy, 'correct horse battery', deps));
+    expect(await target.repo.listItems()).toEqual(await source.repo.listItems());
+  });
+
+  it('writes new backups under the Clew name', async () => {
+    const { db } = await sampleCatalog();
+    const file = await sealArchive(await dumpCatalog(db, 1), 'correct horse battery', deps);
+    expect(Buffer.from(file.subarray(0, 4)).toString()).toBe('CLEW');
+    expect(Buffer.from(file).includes('"app":"clew"')).toBe(true);
+    expect((await openArchive(file, 'correct horse battery', deps)).format).toBe('clew-catalog');
   });
 
   it('refuses short passphrases and files that are not archives', async () => {

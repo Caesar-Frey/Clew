@@ -65,7 +65,7 @@ export default function CatalogScreen() {
               <T variant="label" color={p.headRule}>
                 The catalog · {items.length} {items.length === 1 ? 'card' : 'cards'}
               </T>
-              <T variant="title">Whereabouts</T>
+              <T variant="title">Clew</T>
             </View>
             <View style={[styles.search, { backgroundColor: p.card, borderColor: p.cardEdge, shadowColor: p.shadow }]}>
               <LoupeIcon size={22} color={p.ink} accent={p.brass} />

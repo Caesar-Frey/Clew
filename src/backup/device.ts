@@ -24,7 +24,7 @@ export const randomBytes = (n: number) => Crypto.getRandomBytesAsync(n);
 function fileName(now: number): string {
   const d = new Date(now);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `Whereabouts ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.${ARCHIVE_EXTENSION}`;
+  return `Clew ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.${ARCHIVE_EXTENSION}`;
 }
 
 /**
@@ -40,7 +40,7 @@ export async function shareArchive(bytes: Uint8Array, now: number): Promise<void
     await Sharing.shareAsync(file.uri, {
       mimeType: 'application/octet-stream',
       UTI: 'public.data',
-      dialogTitle: 'Save your Whereabouts backup',
+      dialogTitle: 'Save your Clew backup',
     });
   } finally {
     try {
@@ -58,7 +58,7 @@ export async function pickArchive(): Promise<{ name: string; bytes: Uint8Array }
   const asset = result.assets[0];
   const file = new File(asset.uri);
   try {
-    if ((file.size ?? 0) > 512 * 1024 * 1024) throw new Error('That file is too large to be a Whereabouts backup.');
+    if ((file.size ?? 0) > 512 * 1024 * 1024) throw new Error('That file is too large to be a Clew backup.');
     return { name: asset.name, bytes: await file.bytes() };
   } finally {
     try {

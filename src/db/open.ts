@@ -5,6 +5,7 @@ import { forgetKeys, newKey, readKey, storeNewKey } from '../security/keyVault';
 import { migrate } from './schema';
 import type { Db } from './types';
 
+// Old app name kept on purpose: renaming the file would hide the existing catalog.
 const DB_NAME = 'whereabouts.db';
 
 /** The database exists but can't be decrypted with the stored key. */
@@ -49,9 +50,9 @@ export async function openEncryptedDatabase(): Promise<Db> {
   if (!cipher?.cipher_version) {
     if (!__DEV__) {
       await raw.closeAsync().catch(() => {});
-      throw new Error('This build of Whereabouts cannot encrypt data. Please update the app.');
+      throw new Error('This build of Clew cannot encrypt data. Please update the app.');
     }
-    console.warn('[whereabouts] SQLCipher missing: data is NOT encrypted (dev build only).');
+    console.warn('[clew] SQLCipher missing: data is NOT encrypted (dev build only).');
   }
 
   try {

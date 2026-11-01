@@ -55,7 +55,7 @@ export default function IdentifyScreen() {
         {state === 'cancelled' && (
           <View style={styles.center}>
             <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
-              Take a photo of a box, or of the label you wrote on it, and Whereabouts finds which one it is.
+              Take a photo of a box, or of the label you wrote on it, and Clew finds which one it is.
             </T>
             <LibraryButton label="Take a photo" icon={(c) => <CameraIcon size={20} color={c} />} onPress={run} />
           </View>
@@ -75,7 +75,7 @@ export default function IdentifyScreen() {
               <View style={styles.center}>
                 <Stamp text="No match" sub="not in the catalog" color={p.stamp} />
                 <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
-                  None of your fingerprinted boxes looks like this. To teach Whereabouts a box, open its shelf and tap “Fingerprint this box”.
+                  None of your fingerprinted boxes looks like this. To teach Clew a box, open its shelf and tap “Fingerprint this box”.
                 </T>
               </View>
             ) : (
