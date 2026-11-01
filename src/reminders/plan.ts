@@ -37,7 +37,7 @@ export function planReminders(items: Item[], now: number, discreet: boolean): Pl
         at: dueMorning,
         itemId: item.id,
         title: discreet ? 'Something is due back today' : `${what} is due back today`,
-        body: discreet ? 'Open Whereabouts to see what.' : `${loan.person} has it. Time to ask for it back?`,
+        body: discreet ? 'Open Clew to see what.' : `${loan.person} has it. Time to ask for it back?`,
       });
     }
     if (nudge > now) {
@@ -46,7 +46,7 @@ export function planReminders(items: Item[], now: number, discreet: boolean): Pl
         at: nudge,
         itemId: item.id,
         title: discreet ? 'Something is overdue' : `${what} is overdue`,
-        body: discreet ? 'Open Whereabouts to see what.' : `${loan.person} still has it. It was due ${NUDGE_AFTER_DAYS} days ago.`,
+        body: discreet ? 'Open Clew to see what.' : `${loan.person} still has it. It was due ${NUDGE_AFTER_DAYS} days ago.`,
       });
     }
   }

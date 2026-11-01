@@ -30,7 +30,7 @@ export default function DeskScreen() {
       const granted = permission === 'undetermined' && (await askForReminders());
       setPermission(granted ? 'granted' : 'denied');
       if (!granted) {
-        Alert.alert('Notifications are off', 'Allow notifications for Whereabouts in Settings to get due-date reminders.', [
+        Alert.alert('Notifications are off', 'Allow notifications for Clew in Settings to get due-date reminders.', [
           { text: 'Not now', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
         ]);
@@ -147,7 +147,7 @@ export default function DeskScreen() {
               <T variant="heading">Due-date reminders</T>
               <T variant="small">
                 {permission === 'denied'
-                  ? 'Notifications are off for Whereabouts in Settings.'
+                  ? 'Notifications are off for Clew in Settings.'
                   : lock.enabled
                     ? 'A nudge at 9am on the due day. While the app is locked, they don’t say what or who.'
                     : 'A nudge at 9am on the day something is due back, and again if it’s late.'}
@@ -224,7 +224,10 @@ export default function DeskScreen() {
         </View>
 
         <T variant="small" color={p.inkFaint} style={{ textAlign: 'center', marginTop: 12 }}>
-          Whereabouts {Constants.expoConfig?.version ?? ''}
+          Clew {Constants.expoConfig?.version ?? ''}
+        </T>
+        <T variant="small" color={p.inkFaint} style={{ textAlign: 'center', fontStyle: 'italic' }}>
+          A clew is a ball of thread, like the one that led Theseus back out of the labyrinth.
         </T>
       </ScrollView>
     </Room>

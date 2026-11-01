@@ -1,4 +1,4 @@
-// Renders the Whereabouts icon set into assets/: a card-catalog drawer front
+// Renders the Clew icon set into assets/: a card-catalog drawer front
 // in oxblood leather with a brass label holder and cup pull, on banker's-lamp
 // green. Needs Playwright's Chromium: `node scripts/make-icons.js [outDir]`.
 const fs = require('fs');

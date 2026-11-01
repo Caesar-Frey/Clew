@@ -12,15 +12,22 @@ import type { Db, SqlValue } from '../db/types';
  * a computer) and opened on a new phone.
  *
  * File layout:
- *   "WHBK" | u8 format version | u32 BE header length | header JSON | sealed body
+ *   "CLEW" | u8 format version | u32 BE header length | header JSON | sealed body
  * The header holds the KDF parameters, salt and nonce. The body is AES-256-GCM
  * over the catalog JSON, with every byte before it as associated data, so a
  * tampered header fails to open just like a wrong passphrase.
+ *
+ * The app was called Whereabouts before it was Clew. Archives from then start
+ * with "WHBK" and name the old app in the header and catalog; they still open.
  */
 
-const MAGIC = [0x57, 0x48, 0x42, 0x4b]; // "WHBK"
+const MAGIC = [0x43, 0x4c, 0x45, 0x57]; // "CLEW"
+const LEGACY_MAGIC = [0x57, 0x48, 0x42, 0x4b]; // "WHBK", from the Whereabouts days
 const FORMAT_VERSION = 1;
-export const ARCHIVE_EXTENSION = 'wbk';
+export const ARCHIVE_EXTENSION = 'clew';
+
+const DUMP_FORMATS = ['clew-catalog', 'whereabouts-catalog'];
+const HEADER_APPS = ['clew', 'whereabouts'];
 
 /** Tables in insert order (parents before children). */
 export const BACKUP_TABLES = ['locations', 'items', 'tags', 'item_tags', 'photos', 'loans', 'moves', 'settings'] as const;
@@ -56,7 +63,7 @@ export interface ArchiveDeps {
 type Row = Record<string, string | number | null | { $hex: string }>;
 
 export interface CatalogDump {
-  format: 'whereabouts-catalog';
+  format: 'clew-catalog' | 'whereabouts-catalog';
   schemaVersion: number;
   exportedAt: number;
   tables: Record<string, Row[]>;
@@ -64,7 +71,7 @@ export interface CatalogDump {
 
 export class NotAnArchiveError extends Error {
   constructor() {
-    super("That file isn't a Whereabouts backup.");
+    super("That file isn't a Clew backup.");
     this.name = 'NotAnArchiveError';
   }
 }
@@ -78,7 +85,7 @@ export class WrongPassphraseError extends Error {
 
 export class NewerArchiveError extends Error {
   constructor() {
-    super('This backup was made by a newer version of Whereabouts. Update the app, then try again.');
+    super('This backup was made by a newer version of Clew. Update the app, then try again.');
     this.name = 'NewerArchiveError';
   }
 }
@@ -117,7 +124,7 @@ export async function dumpCatalog(db: Db, now: number): Promise<CatalogDump> {
         return out;
       });
   }
-  return { format: 'whereabouts-catalog', schemaVersion: version?.user_version ?? 0, exportedAt: now, tables };
+  return { format: 'clew-catalog', schemaVersion: version?.user_version ?? 0, exportedAt: now, tables };
 }
 
 /**
@@ -167,7 +174,7 @@ function validateDump(dump: unknown): asserts dump is CatalogDump {
   const d = dump as CatalogDump;
   const ok =
     !!d &&
-    d.format === 'whereabouts-catalog' &&
+    DUMP_FORMATS.includes(d.format) &&
     Number.isInteger(d.schemaVersion) &&
     typeof d.tables === 'object' &&
     d.tables !== null &&
@@ -193,7 +200,7 @@ function validateDump(dump: unknown): asserts dump is CatalogDump {
 /* ------------------------------------------------------------- sealing */
 
 interface Header {
-  app: 'whereabouts';
+  app: 'clew' | 'whereabouts';
   kdf: 'scrypt';
   N: number;
   r: number;
@@ -235,7 +242,7 @@ export async function sealArchive(dump: CatalogDump, passphrase: string, deps: A
   const salt = await deps.randomBytes(16);
   const nonce = await deps.randomBytes(12);
   const header: Header = {
-    app: 'whereabouts',
+    app: 'clew',
     kdf: 'scrypt',
     ...kdf,
     salt: toHex(salt),
@@ -263,7 +270,8 @@ export async function sealArchive(dump: CatalogDump, passphrase: string, deps: A
 }
 
 function parsePrefix(file: Uint8Array): { header: Header; prefix: Uint8Array; body: Uint8Array } {
-  if (file.length < 9 || MAGIC.some((b, i) => file[i] !== b)) throw new NotAnArchiveError();
+  const magicIs = (m: number[]) => m.every((b, i) => file[i] === b);
+  if (file.length < 9 || !(magicIs(MAGIC) || magicIs(LEGACY_MAGIC))) throw new NotAnArchiveError();
   if (file[4]! > FORMAT_VERSION) throw new NewerArchiveError();
   const len = new DataView(file.buffer, file.byteOffset, file.byteLength).getUint32(5);
   if (len > 64 * 1024 || 9 + len >= file.length) throw new NotAnArchiveError();
@@ -274,7 +282,7 @@ function parsePrefix(file: Uint8Array): { header: Header; prefix: Uint8Array; bo
     throw new NotAnArchiveError();
   }
   const sane =
-    header?.app === 'whereabouts' &&
+    HEADER_APPS.includes(header?.app) &&
     header.kdf === 'scrypt' &&
     // Refuse absurd costs a crafted file could use to hang the phone.
     Number.isInteger(header.N) && header.N >= 2 ** 10 && header.N <= 2 ** 20 &&

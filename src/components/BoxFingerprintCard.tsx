@@ -10,7 +10,7 @@ import { usePalette } from '@/ui/theme';
 import { scanBox } from './BoxScanner';
 import { PhotoPlate } from './PhotoPlate';
 
-/** On a place's page: teach Whereabouts what this box looks like. */
+/** On a place's page: teach Clew what this box looks like. */
 export function BoxFingerprintCard({ locationId, name }: { locationId: string; name: string }) {
   const p = usePalette();
   const { boxes, actions } = useData();

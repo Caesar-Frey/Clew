@@ -33,7 +33,7 @@ export function useDictation(onFinal: (text: string) => void) {
     setState('idle');
     if (e.error === 'aborted' || e.error === 'no-speech' || e.error === 'speech-timeout') return;
     if (e.error === 'not-allowed') {
-      Alert.alert('Microphone is off', 'Allow the microphone and speech recognition for Whereabouts in Settings to add things by voice.');
+      Alert.alert('Microphone is off', 'Allow the microphone and speech recognition for Clew in Settings to add things by voice.');
       return;
     }
     if (e.error === 'language-not-supported' && Platform.OS === 'android') {
@@ -50,12 +50,12 @@ export function useDictation(onFinal: (text: string) => void) {
     }
     if (!ExpoSpeechRecognitionModule.supportsOnDeviceRecognition()) {
       if (Platform.OS === 'android') offerAndroidDownload();
-      else Alert.alert('Voice input unavailable', "This phone can't recognise speech offline, and Whereabouts never sends your voice anywhere.");
+      else Alert.alert('Voice input unavailable', "This phone can't recognise speech offline, and Clew never sends your voice anywhere.");
       return;
     }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Microphone is off', 'Allow the microphone and speech recognition for Whereabouts in Settings to add things by voice.');
+      Alert.alert('Microphone is off', 'Allow the microphone and speech recognition for Clew in Settings to add things by voice.');
       return;
     }
     delivered.current = false;
@@ -77,7 +77,7 @@ export function useDictation(onFinal: (text: string) => void) {
 }
 
 function offerAndroidDownload() {
-  Alert.alert('Download offline speech?', 'Whereabouts only uses speech recognition that runs on the phone. Android can download the English offline model.', [
+  Alert.alert('Download offline speech?', 'Clew only uses speech recognition that runs on the phone. Android can download the English offline model.', [
     { text: 'Not now', style: 'cancel' },
     {
       text: 'Download',

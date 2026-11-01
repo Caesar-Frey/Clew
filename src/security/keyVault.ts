@@ -19,6 +19,7 @@ import { nativeAead } from '../backup/device';
  */
 export type KeyMode = 'device' | 'sealed';
 
+// Stored under the app's old name (Whereabouts). Renaming would orphan existing keys and data.
 const PLAIN_KEY = 'whereabouts.dbkey.v1';
 const SEALED_KEY = 'whereabouts.dbkey.sealed.v1';
 const RECOVERY = 'whereabouts.dbkey.recovery.v1';

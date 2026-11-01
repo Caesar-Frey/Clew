@@ -11,6 +11,7 @@ import { getKeyMode, sealKey, unsealKey } from './keyVault';
 
 // Kept in the Keychain/Keystore (not the database) so it can be read before
 // anything is shown, and can't be flipped by editing app files.
+// Old app name kept on purpose: renaming the key would forget the lock setting.
 const LOCK_KEY = 'whereabouts.applock.v1';
 const STORE_OPTS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -102,7 +103,7 @@ export function LockGate({ children }: { children: ReactNode }) {
   const unlock = useCallback(async () => {
     setBusy(true);
     try {
-      if (await authenticate('Unlock Whereabouts')) {
+      if (await authenticate('Unlock Clew')) {
         setGate('unlocked');
         setEverUnlocked(true);
       }
