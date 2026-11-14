@@ -12,6 +12,7 @@ function setup(initial: ReminderPermission) {
     scheduled: [] as PlannedReminder[][],
     asks: 0,
     failNext: false,
+    answer: true,
   };
   let syncer: ReturnType<typeof createReminderSyncer>;
   syncer = createReminderSyncer({
@@ -19,8 +20,8 @@ function setup(initial: ReminderPermission) {
     permission: async () => state.permission,
     ask: async () => {
       state.asks++;
-      state.permission = 'granted';
-      return true;
+      state.permission = state.answer ? 'granted' : 'denied';
+      return state.answer;
     },
     asked: () => state.asked,
     markAsked: async () => {
@@ -73,5 +74,31 @@ describe('reminder syncing', () => {
     state.plan = [];
     await syncer.run();
     expect(state.scheduled).toEqual([[]]);
+  });
+  it('a "no" to the prompt schedules nothing; turning it on in Settings later schedules on the next foreground', async () => {
+    const { state, syncer } = setup('undetermined');
+    state.answer = false;
+    await syncer.run();
+    expect(state.asks).toBe(1);
+    expect(state.scheduled).toEqual([]);
+    await syncer.run();
+    expect(state.asks).toBe(1);
+    state.permission = 'granted';
+    await syncer.run(true);
+    expect(state.scheduled).toEqual([[reminder('due:1')]]);
+  });
+
+  it('follows the plan as loans come and go, and goes round again for a change made mid-run', async () => {
+    const { state, syncer } = setup('granted');
+    await syncer.run();
+    state.plan = [reminder('due:1'), reminder('due:2')];
+    const first = syncer.run();
+    state.plan = [reminder('due:2')]; // the first loan is returned while scheduling
+    void syncer.run();
+    await first;
+    expect(state.scheduled.at(-1)).toEqual([reminder('due:2')]);
+    state.plan = [];
+    await syncer.run();
+    expect(state.scheduled.at(-1)).toEqual([]);
   });
 });
