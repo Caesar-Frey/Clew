@@ -12,7 +12,7 @@ import type { HistoryEvent } from '@/db/types';
 import { callNumber, dueState, relativeDays, shortDate, stampDate } from '@/lib/format';
 import { useData, useItem, useRecentPlaces } from '@/state/data';
 import { BrassPlate, IndexCard, KeyboardScreen, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
-import { BinIcon, CameraIcon, CheckedOutIcon, ReshelveIcon, StampIcon } from '@/ui/icons';
+import { CameraIcon, CheckedOutIcon, ReshelveIcon, StampIcon } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
 import { HeaderText } from '@/ui/HeaderText';
 import { useToast } from '@/ui/toast';
@@ -96,15 +96,21 @@ export default function ItemScreen() {
   };
 
   // No "are you sure?": the card can be put back from the notice.
-  const withdraw = async () => {
+  const remove = async () => {
     goBackOrHome();
     try {
       const snapshot = await actions.deleteItem(item.id);
-      if (snapshot) toast({ message: `Withdrew “${item.name}”`, undo: () => actions.restoreItem(snapshot) });
+      if (snapshot) toast({ message: `Deleted “${item.name}”`, undo: () => actions.restoreItem(snapshot) });
     } catch (e) {
       showError(e);
     }
   };
+  const more = () =>
+    Alert.alert(item.name, undefined, [
+      { text: 'Delete', style: 'destructive', onPress: remove },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  const goesBackTo = () => router.push({ pathname: '/move/[id]', params: { id: item.id } });
 
   const saveEdit = async () => {
     if (!draft || saving) return;
@@ -137,7 +143,10 @@ export default function ItemScreen() {
             editing ? (
               <HeaderText label={saving ? 'Saving…' : 'Save'} bold onPress={saveEdit} />
             ) : (
-              <HeaderText label="Edit" onPress={() => setDraft(initialDraft())} />
+              <View style={styles.row}>
+                <HeaderText label="Edit" onPress={() => setDraft(initialDraft())} />
+                <HeaderText label="⋯" accessibilityLabel="More actions" onPress={more} />
+              </View>
             ),
         }}
       />
@@ -187,15 +196,21 @@ export default function ItemScreen() {
                       With <T variant="heading">{loan.person}</T> since {shortDate(loan.lentAt)}
                       {loan.dueAt ? `, due ${relativeDays(loan.dueAt)}` : ''}.
                     </T>
+                    <Pressable accessibilityRole="button" onPress={goesBackTo} hitSlop={8} style={{ gap: 2 }}>
+                      <T variant="label">Goes back to</T>
+                      <T variant="typed" color={path.length ? p.ink : p.leatherText}>
+                        {path.length ? `${path.join(' › ')}  ›` : 'Choose a place  ›'}
+                      </T>
+                    </Pressable>
                   </View>
                 ) : path.length ? (
                   <Pressable
                     accessibilityRole="link"
-                    accessibilityLabel={`In ${path.join(', ')}. Open shelf`}
+                    accessibilityLabel={`In ${path.join(', ')}. Open place`}
                     onPress={() => router.push({ pathname: '/place/[id]', params: { id: item.locationId! } })}
                     style={{ gap: 6 }}
                   >
-                    <T variant="label">Shelved at</T>
+                    <T variant="label">It is in</T>
                     <View style={styles.pathWrap}>
                       {path.map((n, i) => (
                         <View key={i} style={styles.pathPart}>
@@ -209,7 +224,7 @@ export default function ItemScreen() {
                   </Pressable>
                 ) : (
                   <T variant="italic" color={p.inkSoft}>
-                    Not shelved yet.
+                    No place yet.
                   </T>
                 )}
                 {item.tags.length > 0 && (
@@ -239,7 +254,7 @@ export default function ItemScreen() {
 
         {loan ? (
           <View style={{ gap: 10 }}>
-            <LibraryButton label="It's back" tone="lamp" icon={(c) => <StampIcon size={20} color={c} />} onPress={markReturned} />
+            <LibraryButton label="Returned" tone="lamp" icon={(c) => <StampIcon size={20} color={c} />} onPress={markReturned} />
             <LibraryButton
               label="Change due date"
               tone="ghost"
@@ -248,7 +263,7 @@ export default function ItemScreen() {
           </View>
         ) : (
           <View style={{ gap: 12 }}>
-            <SectionLabel>Moved it? Tap its new shelf</SectionLabel>
+            <SectionLabel>Moved it? Tap where it is now</SectionLabel>
             {moveTargets.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 6 }}>
                 {moveTargets.map((l) => (
@@ -261,27 +276,21 @@ export default function ItemScreen() {
                 ))}
               </ScrollView>
             )}
-            <View style={styles.row}>
-              <LibraryButton
-                style={{ flex: 1 }}
-                label="Elsewhere"
-                tone="ghost"
-                icon={(c) => <ReshelveIcon size={20} color={c} />}
-                onPress={() => router.push({ pathname: '/move/[id]', params: { id: item.id } })}
-              />
-              <LibraryButton
-                style={{ flex: 1 }}
-                label="Lend it"
-                icon={(c) => <CheckedOutIcon size={20} color={c} />}
-                onPress={() => router.push({ pathname: '/lend/[id]', params: { id: item.id } })}
-              />
-            </View>
+            <LibraryButton
+              label="Move somewhere else"
+              icon={(c) => <ReshelveIcon size={20} color={c} />}
+              onPress={() => router.push({ pathname: '/move/[id]', params: { id: item.id } })}
+            />
+            <LibraryButton
+              label="Lend it"
+              tone="ghost"
+              icon={(c) => <CheckedOutIcon size={20} color={c} />}
+              onPress={() => router.push({ pathname: '/lend/[id]', params: { id: item.id } })}
+            />
           </View>
         )}
 
         <DateDueSlip history={history} />
-
-        <LibraryButton label="Withdraw from catalog" tone="ghost" icon={(c) => <BinIcon size={18} color={c} />} onPress={withdraw} />
       </ScrollView>
       </KeyboardScreen>
     </Room>
@@ -346,7 +355,7 @@ function DateDueSlip({ history }: { history: HistoryEvent[] }) {
   return (
     <View style={[styles.slip, { backgroundColor: p.scheme === 'dark' ? '#2E2418' : '#F4E9C9', borderColor: p.cardEdge }]}>
       <T variant="label" style={{ textAlign: 'center', marginBottom: 6 }}>
-        Circulation record
+        History
       </T>
       {history.map((h) => (
         <View key={h.id} style={[styles.slipRow, { borderTopColor: p.rule }]}>
