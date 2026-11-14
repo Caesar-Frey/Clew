@@ -5,6 +5,7 @@ import { Alert, Linking, ScrollView, StyleSheet, Switch, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { canSealWithBiometrics, canUseDeviceAuth, RELOCK_AFTER_MS, useAppLock } from '@/security/lock';
+import { MODEL_LICENCES } from '@/ai/models';
 import { AssistantCard } from '@/components/AssistantCard';
 import { REMINDERS_OFF_KEY } from '@/components/ReminderSync';
 import { olderThan, relativeDays, shortDate } from '@/lib/format';
@@ -223,6 +224,30 @@ export default function DeskScreen() {
           <Stat label="Lent out" value={lent} />
         </View>
 
+        <SectionLabel>Open-source licences</SectionLabel>
+        <IndexCard punched={false} ruled={false} style={{ paddingBottom: 16 }}>
+          <View style={{ gap: 10 }}>
+            <T variant="small">The optional assistant downloads these open models. Each is used under its licence.</T>
+            {MODEL_LICENCES.map((m) => (
+              <View key={m.name} style={[styles.row, styles.licence, { borderTopColor: p.rule }]}>
+                <T variant="body" style={{ flex: 1 }}>
+                  {m.name}
+                </T>
+                <T
+                  variant="small"
+                  color={p.headRule}
+                  accessibilityRole="link"
+                  accessibilityLabel={`${m.name}, ${m.licence} licence. Opens the model page.`}
+                  onPress={() => Linking.openURL(m.source)}
+                  style={styles.link}
+                >
+                  {m.licence}
+                </T>
+              </View>
+            ))}
+          </View>
+        </IndexCard>
+
         <T variant="small" color={p.inkFaint} style={{ textAlign: 'center', marginTop: 12 }}>
           Clew {Constants.expoConfig?.version ?? ''}
         </T>
@@ -266,6 +291,8 @@ const styles = StyleSheet.create({
   badge: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   stats: { flexDirection: 'row', gap: 10 },
   buttons: { flexDirection: 'row', gap: 10 },
+  licence: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  link: { minHeight: 44, textAlignVertical: 'center', paddingVertical: 12, textDecorationLine: 'underline' },
   subRow: { marginTop: 14, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
   stat: { flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 4, borderWidth: StyleSheet.hairlineWidth },
 });

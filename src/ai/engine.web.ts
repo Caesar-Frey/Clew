@@ -8,6 +8,7 @@ import { parseTagReply, type TagDraft } from './text';
 export interface DownloadProgress {
   fraction: number;
   file: string;
+  phase: 'download' | 'check';
 }
 
 let installed = false;
@@ -18,7 +19,7 @@ export async function downloadModel(m: VisionModel, onProgress: (p: DownloadProg
   for (let i = 1; i <= 20; i++) {
     await new Promise((r) => setTimeout(r, 150));
     if (signal?.aborted) throw new Error('Cancelled');
-    onProgress({ fraction: i / 20, file: m.model.name });
+    onProgress({ fraction: i / 20, file: m.model.name, phase: i > 16 ? 'check' : 'download' });
   }
   installed = true;
 }

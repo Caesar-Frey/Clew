@@ -65,7 +65,8 @@ export function AssistantCard() {
             <View style={[styles.fill, { width: `${Math.max(2, fraction * 100)}%`, backgroundColor: p.lamp }]} />
           </View>
           <T variant="small">
-            Fetching {status.model.title}… {Math.round(fraction * 100)}% of {formatSize(totalBytes(status.model))}. Keep the app open.
+            {status.progress?.phase === 'check' ? 'Checking the files' : `Fetching ${status.model.title}`}… {Math.round(fraction * 100)}% of{' '}
+            {formatSize(totalBytes(status.model))}. Keep the app open.
           </T>
           <LibraryButton compact tone="ghost" label="Cancel" onPress={cancel} />
         </View>
