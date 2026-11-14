@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View, type TextInputInstance } from 'react-native';
@@ -24,6 +23,7 @@ import { useToast } from '@/ui/toast';
 import { useDiscardGuard } from '@/ui/useDiscardGuard';
 import { parseSpokenCard, resolveSpokenPlace } from '@/voice/parse';
 import { useDictation } from '@/voice/useDictation';
+import { haptic } from '@/ui/haptics';
 
 /** New card: name, place, then optional tools in one row. */
 export default function AddScreen() {
@@ -129,7 +129,7 @@ export default function AddScreen() {
         lendTo: lent ? { person: loan.person, dueAt: loan.dueAt } : undefined,
         photos,
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success().catch(() => {});
       const undo = () => actions.deleteItem(id);
       const view = { label: 'View', onPress: () => router.push(`/item/${id}`) };
       if (lent) toast({ message: `Lent “${savedName}” to ${loan.person.trim()}`, undo, action: view });
@@ -215,7 +215,7 @@ export default function AddScreen() {
                       <PhotoPlate base64={ph.thumb} aspect={1} style={{ width: 72 }} tilt={i % 2 ? 1.5 : -1.5} />
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel="Remove photo"
+                        accessibilityLabel={`Remove photo ${i + 1}`}
                         hitSlop={8}
                         onPress={() => setPhotos((list) => list.filter((x) => x !== ph))}
                         style={[styles.removePhoto, { backgroundColor: p.leather }]}
@@ -288,8 +288,8 @@ export default function AddScreen() {
             </T>
           )}
 
-          <LibraryButton label={label} onPress={() => save(false)} />
-          <LibraryButton label="Save and add another" tone="ghost" onPress={() => save(true)} />
+          <LibraryButton label={label} haptic={false} onPress={() => save(false)} />
+          <LibraryButton label="Save and add another" tone="ghost" haptic={false} onPress={() => save(true)} />
         </ScrollView>
       </KeyboardScreen>
     </Room>

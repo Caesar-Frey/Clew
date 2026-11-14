@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -87,7 +86,6 @@ export default function ItemScreen() {
   const markReturned = async () => {
     try {
       const loanId = await actions.returnItem(item.id);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       flash('Returned', p.stampReturned, todayStamp());
       if (loanId) toast({ message: `Back from ${loan?.person}`, undo: () => actions.undoReturn(loanId).then(() => setStamp(null)) });
     } catch (e) {
@@ -177,7 +175,7 @@ export default function ItemScreen() {
                     {item.photoIds.length > 1 && (
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, padding: 4 }}>
                         {item.photoIds.slice(1).map((pid, i) => (
-                          <Thumb key={pid} id={pid} tilt={i % 2 ? 1.5 : -1.5} onPress={() => openPhoto(pid)} />
+                          <Thumb key={pid} id={pid} label={`Photo ${i + 2} of ${item.name}`} tilt={i % 2 ? 1.5 : -1.5} onPress={() => openPhoto(pid)} />
                         ))}
                       </ScrollView>
                     )}
@@ -248,13 +246,13 @@ export default function ItemScreen() {
 
         {stamp && (
           <View key={stamp.key} style={styles.center}>
-            <Stamp text={stamp.text} sub={stamp.sub} color={stamp.color} />
+            <Stamp text={stamp.text} sub={stamp.sub} color={stamp.color} thud />
           </View>
         )}
 
         {loan ? (
           <View style={{ gap: 10 }}>
-            <LibraryButton label="Returned" tone="lamp" icon={(c) => <StampIcon size={20} color={c} />} onPress={markReturned} />
+            <LibraryButton label="Returned" tone="lamp" haptic={false} icon={(c) => <StampIcon size={20} color={c} />} onPress={markReturned} />
             <LibraryButton
               label="Change due date"
               tone="ghost"
@@ -307,8 +305,8 @@ interface Draft {
 
 const todayStamp = () => stampDate(Date.now());
 
-function Thumb({ id, tilt, onPress }: { id: string; tilt: number; onPress: () => void }) {
-  return <PhotoPlate base64={null} photoId={id} aspect={1} style={{ width: 84 }} tilt={tilt} onPress={onPress} />;
+function Thumb({ id, label, tilt, onPress }: { id: string; label: string; tilt: number; onPress: () => void }) {
+  return <PhotoPlate base64={null} photoId={id} aspect={1} style={{ width: 84 }} tilt={tilt} onPress={onPress} accessibilityLabel={label} />;
 }
 
 const showError = (e: unknown) =>
@@ -391,7 +389,7 @@ function describe(h: HistoryEvent): string {
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 22 },
+  cardTop: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', minHeight: 22, gap: 4 },
   pathWrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   pathPart: { flexDirection: 'row', alignItems: 'center' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

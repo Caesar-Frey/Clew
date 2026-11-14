@@ -116,6 +116,9 @@ export default function PlaceScreen() {
                       <View key={i} style={styles.crumb}>
                         {i > 0 && <T variant="typed" color={p.brass}> › </T>}
                         <Pressable
+                          accessibilityRole={last ? 'text' : 'link'}
+                          accessibilityLabel={last ? n : `Open ${n}`}
+                          hitSlop={10}
                           disabled={last || !ancestorId}
                           onPress={() => ancestorId && router.push({ pathname: '/place/[id]', params: { id: ancestorId } })}
                         >

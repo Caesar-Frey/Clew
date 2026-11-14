@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -7,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAnimatedValue, useReducedMotion } from './animated';
 import { fonts, usePalette } from './theme';
 import { pushToast, runUndo, SHOW_MS, toastLift } from './toastStack';
+import { haptic } from './haptics';
 
 interface ToastInput {
   message: string;
@@ -172,7 +172,7 @@ function Slip({
             disabled={busy}
             onPress={async () => {
               setBusy(true);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              haptic.impact('light').catch(() => {});
               const ok = await runUndo(toast.undo ?? (() => {}));
               hide();
               if (!ok) onUndoFailed();

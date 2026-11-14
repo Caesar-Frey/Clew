@@ -1,13 +1,13 @@
-import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { useEffect, type ComponentType } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useAnimatedValue } from '@/ui/animated';
+import { useAnimatedValue, useReducedMotion } from '@/ui/animated';
 import { CatalogIcon, CheckedOutIcon, DeskIcon, NewCardIcon, ShelvesIcon, type IconProps } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
 import { useReportTabBarHeight } from '@/ui/toast';
+import { haptic } from '@/ui/haptics';
 
 /** Pass as `tabBarBadge` for a plain dot instead of a number (backup due). */
 export const BACKUP_DOT = '•';
@@ -47,7 +47,7 @@ export function CabinetTabBar({ state, emitter, navigateToTab, insets, descripto
         onPress={() => {
           const event = emitter.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
           if (!focused && !event.defaultPrevented) {
-            Haptics.selectionAsync().catch(() => {});
+            haptic.selection().catch(() => {});
             navigateToTab(route.key);
           }
         }}
@@ -85,9 +85,11 @@ function Drawer({
 }) {
   const p = usePalette();
   const out = useAnimatedValue(focused ? 1 : 0);
+  const still = useReducedMotion();
   useEffect(() => {
-    Animated.spring(out, { toValue: focused ? 1 : 0, useNativeDriver: true, speed: 18, bounciness: 9 }).start();
-  }, [focused, out]);
+    if (still) out.setValue(focused ? 1 : 0);
+    else Animated.spring(out, { toValue: focused ? 1 : 0, useNativeDriver: true, speed: 18, bounciness: 9 }).start();
+  }, [focused, out, still]);
   const face = p.scheme === 'dark' ? '#3A2618' : '#7A5034';
   const faceOpen = p.scheme === 'dark' ? '#4A3020' : '#8C5D3D';
   return (
@@ -117,13 +119,13 @@ function Drawer({
             {label}
           </Text>
         </View>
-        <Icon size={20} color={focused ? p.brassLight : p.brass} accent={focused ? 'rgba(226,197,142,0.25)' : undefined} />
+        <Icon size={20} color={focused || p.scheme === 'light' ? p.brassLight : p.brass} accent={focused ? 'rgba(226,197,142,0.25)' : undefined} />
         <View style={[styles.pull, { backgroundColor: p.brass }]} />
         {badge === BACKUP_DOT ? (
           <View style={[styles.dot, { backgroundColor: p.stamp }]} />
         ) : badge ? (
           <View style={[styles.badge, { backgroundColor: p.stamp }]}>
-            <Text maxFontSizeMultiplier={1.4} style={styles.badgeText}>
+            <Text maxFontSizeMultiplier={1.4} style={[styles.badgeText, { color: p.scheme === 'dark' ? '#1A100A' : '#FFF4E6' }]}>
               {badge}
             </Text>
           </View>
@@ -141,7 +143,7 @@ function NewCardButton() {
       accessibilityRole="button"
       accessibilityLabel="Add a thing"
       onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        haptic.impact('medium').catch(() => {});
         router.push('/add');
       }}
       onPressIn={() => Animated.spring(scale, { toValue: 0.9, useNativeDriver: true, speed: 50 }).start()}
@@ -192,7 +194,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: { color: '#FFF4E6', fontFamily: fonts.typedBold, fontSize: 10 },
+  badgeText: { fontFamily: fonts.typedBold, fontSize: 10 },
   dot: { position: 'absolute', top: -5, right: -2, width: 10, height: 10, borderRadius: 5 },
   newCard: {
     width: 60,

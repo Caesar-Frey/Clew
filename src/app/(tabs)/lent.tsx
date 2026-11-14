@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
@@ -11,6 +10,7 @@ import { IndexCard, LibraryButton, Room, Stamp, T } from '@/ui/components';
 import { PersonIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
 import { useToast } from '@/ui/toast';
+import { haptic } from '@/ui/haptics';
 
 /** Who has my stuff: active loans grouped by borrower, overdue first. */
 export default function LentScreen() {
@@ -99,11 +99,12 @@ export default function LentScreen() {
                     compact
                     tone="lamp"
                     label="Returned"
+                    haptic={false}
                     accessibilityLabel={`Mark ${item.name} returned`}
                     onPress={async () => {
                       try {
                         const loanId = await actions.returnItem(item.id);
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                        haptic.success().catch(() => {});
                         if (loanId) toast({ message: `“${item.name}” is back`, undo: () => actions.undoReturn(loanId) });
                       } catch (e) {
                         Alert.alert("That didn't save", e instanceof Error ? e.message : String(e));

@@ -125,6 +125,6 @@ function Tag({ label, selected, onPress }: { label: string; selected?: boolean; 
 
 const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tag: { borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 6 },
+  tag: { borderWidth: 1, borderRadius: 3, paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' },
   picker: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 4, overflow: 'hidden' },
 });

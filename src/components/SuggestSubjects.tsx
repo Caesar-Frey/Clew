@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -7,6 +6,7 @@ import { tagList, type TagDraft } from '@/ai/text';
 import { T } from '@/ui/components';
 import { SparkIcon } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
+import { haptic } from '@/ui/haptics';
 
 /**
  * "Suggest tags": asks the on-device assistant for a name and tags,
@@ -122,7 +122,7 @@ function Slip({ label, a11y, onPress }: { label: string; a11y: string; onPress: 
       accessibilityRole="button"
       accessibilityLabel={a11y}
       onPress={() => {
-        Haptics.selectionAsync().catch(() => {});
+        haptic.selection().catch(() => {});
         onPress();
       }}
       style={({ pressed }) => [

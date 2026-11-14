@@ -71,7 +71,7 @@ export const ItemCard = memo(function ItemCard({
 });
 
 const styles = StyleSheet.create({
-  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 22, marginBottom: 6 },
+  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 22, marginBottom: 6 },
   callNo: { letterSpacing: 1.5, flexShrink: 1 },
   out: { borderWidth: 1.5, borderRadius: 3, paddingHorizontal: 6, paddingVertical: 1, transform: [{ rotate: '-4deg' }] },
   title: { marginBottom: 2 },

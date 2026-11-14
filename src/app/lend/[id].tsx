@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView } from 'react-native';
@@ -9,6 +8,7 @@ import { KeyboardScreen, LibraryButton, Room, T } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
 import { useToast } from '@/ui/toast';
 import { useDiscardGuard } from '@/ui/useDiscardGuard';
+import { haptic } from '@/ui/haptics';
 
 /** Lend something out, or change the due date of a current loan. */
 export default function LendScreen() {
@@ -40,7 +40,7 @@ export default function LendScreen() {
         const loanId = await actions.lendItem(item.id, loan);
         toast({ message: `Lent “${item.name}” to ${loan.person.trim()}`, undo: () => actions.undoLend(loanId) });
       }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success().catch(() => {});
       leave();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -70,6 +70,7 @@ export default function LendScreen() {
           <LibraryButton
             label={busy ? 'Saving…' : existing ? 'Update due date' : `Lend to ${loan.person.trim() || 'someone'}`}
             disabled={busy}
+            haptic={false}
             onPress={save}
           />
         </ScrollView>

@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -11,6 +10,7 @@ import { useData } from '@/state/data';
 import { IndexCard, KeyboardScreen, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
 import { useDiscardGuard } from '@/ui/useDiscardGuard';
+import { haptic } from '@/ui/haptics';
 
 /** Make an encrypted backup, or restore one (`?mode=restore`). */
 export default function ArchiveScreen() {
@@ -78,7 +78,7 @@ function BackupFlow() {
     if (!shared) return;
     try {
       await actions.recordBackup(shared.at);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success().catch(() => {});
       setDone(shared.at);
     } catch (e) {
       setError(errorText(e));
@@ -102,7 +102,7 @@ function BackupFlow() {
           </T>
         )}
         <View style={{ gap: 12, alignSelf: 'stretch' }}>
-          <LibraryButton label="Yes, it's saved" tone="lamp" onPress={confirmSaved} />
+          <LibraryButton label="Yes, it's saved" tone="lamp" haptic={false} onPress={confirmSaved} />
           {notYet ? (
             <LibraryButton label="Share it again" tone="ghost" onPress={() => shareAgain(shared.uri).catch((e: unknown) => setError(errorText(e)))} />
           ) : (
@@ -192,7 +192,7 @@ function RestoreFlow() {
   const replace = async (dump: CatalogDump) => {
     try {
       await actions.restoreArchive(dump);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success().catch(() => {});
       setDone(dump);
     } catch (e) {
       setError(`Nothing was changed. ${errorText(e)}`);
@@ -275,6 +275,7 @@ function RestoreFlow() {
             label={progress === null ? 'Open and restore' : `Opening… ${Math.round(progress * 100)}%`}
             tone="lamp"
             disabled={progress !== null}
+            haptic={false}
             onPress={open}
           />
         </>

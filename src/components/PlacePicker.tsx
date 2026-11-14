@@ -121,7 +121,7 @@ export function PlacePicker({
                 {field.value.kind === 'new' ? '  (new)' : ''}
               </T>
             </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="Clear place" onPress={clear} style={styles.clear} hitSlop={6}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Clear place" onPress={clear} style={styles.clear} hitSlop={12}>
               <CloseIcon size={14} color={p.inkSoft} />
             </Pressable>
           </View>

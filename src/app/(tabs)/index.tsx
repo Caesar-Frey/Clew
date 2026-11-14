@@ -94,7 +94,8 @@ export default function CatalogScreen() {
               />
               {query ? (
                 <Pressable
-                  hitSlop={12}
+                  hitSlop={14}
+                  accessibilityRole="button"
                   accessibilityLabel="Clear search"
                   onPress={() => {
                     setQuery('');

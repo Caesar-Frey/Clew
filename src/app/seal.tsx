@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +8,7 @@ import { useAppLock } from '@/security/lock';
 import { IndexCard, KeyboardScreen, LibraryButton, Room, T, TypedInput } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
 import { useDiscardGuard } from '@/ui/useDiscardGuard';
+import { haptic } from '@/ui/haptics';
 
 /** Seal the catalog key behind Face ID / fingerprint, with a recovery passphrase. */
 export default function SealScreen() {
@@ -33,7 +33,7 @@ export default function SealScreen() {
     setError(null);
     try {
       await lock.seal(pass);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success().catch(() => {});
       leave();
     } catch (e) {
       if (e instanceof SealIncompleteError) {
@@ -86,7 +86,7 @@ export default function SealScreen() {
               {error}
             </T>
           )}
-          <LibraryButton label={busy ? 'Turning on…' : 'Require Face ID or fingerprint'} tone="lamp" disabled={busy} onPress={seal} />
+          <LibraryButton label={busy ? 'Turning on…' : 'Require Face ID or fingerprint'} tone="lamp" disabled={busy} haptic={false} onPress={seal} />
         </ScrollView>
       </KeyboardScreen>
     </Room>

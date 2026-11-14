@@ -13,6 +13,7 @@ import { askForReminders, reminderPermission, type ReminderPermission } from '@/
 import { BACKUP_STALE_MS } from '@/lib/backupNudge';
 import { LAST_BACKUP_KEY, useData } from '@/state/data';
 import { IndexCard, LibraryButton, Room, SectionLabel, T } from '@/ui/components';
+import { HAPTICS_OFF_KEY, setHapticsEnabled } from '@/ui/haptics';
 import { ArchiveBoxIcon, BellIcon, KeyholeIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
 
@@ -116,9 +117,9 @@ export default function DeskScreen() {
               value={lock.enabled}
               disabled={busy || available === null}
               onValueChange={toggleLock}
-              trackColor={{ true: p.lamp, false: p.cardEdge }}
+              trackColor={{ true: p.lamp, false: p.inkFaint }}
               thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
-              ios_backgroundColor={p.cardEdge}
+              ios_backgroundColor={p.inkFaint}
               accessibilityLabel="App lock"
             />
           </View>
@@ -136,9 +137,9 @@ export default function DeskScreen() {
                 value={lock.sealed}
                 disabled={busy}
                 onValueChange={toggleSeal}
-                trackColor={{ true: p.lamp, false: p.cardEdge }}
+                trackColor={{ true: p.lamp, false: p.inkFaint }}
                 thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
-                ios_backgroundColor={p.cardEdge}
+                ios_backgroundColor={p.inkFaint}
                 accessibilityLabel="Require Face ID to open data"
               />
             </View>
@@ -164,10 +165,27 @@ export default function DeskScreen() {
               value={remindersOn}
               disabled={permission === null}
               onValueChange={toggleReminders}
-              trackColor={{ true: p.lamp, false: p.cardEdge }}
+              trackColor={{ true: p.lamp, false: p.inkFaint }}
               thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
-              ios_backgroundColor={p.cardEdge}
+              ios_backgroundColor={p.inkFaint}
               accessibilityLabel="Due-date reminders"
+            />
+          </View>
+          <View style={[styles.row, styles.subRow, { borderTopColor: p.rule }]}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <T variant="body">Haptics</T>
+              <T variant="small">Small taps you feel when you save, move or return something.</T>
+            </View>
+            <Switch
+              value={settings[HAPTICS_OFF_KEY] !== '1'}
+              onValueChange={(on) => {
+                setHapticsEnabled(on);
+                actions.setSetting(HAPTICS_OFF_KEY, on ? '0' : '1').catch(() => {});
+              }}
+              trackColor={{ true: p.lamp, false: p.inkFaint }}
+              thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
+              ios_backgroundColor={p.inkFaint}
+              accessibilityLabel="Haptics"
             />
           </View>
         </IndexCard>

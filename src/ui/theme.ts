@@ -40,17 +40,17 @@ export interface Palette {
   shadow: string;
 }
 
-const light: Palette = {
+export const light: Palette = {
   scheme: 'light',
   room: '#EFE4CC',
   grain: 'rgba(122, 90, 52, 0.05)',
   card: '#FBF6EA',
   cardEdge: '#E3D6BA',
   rule: 'rgba(86, 128, 170, 0.20)',
-  headRule: '#B04A40',
+  headRule: '#A2433A',
   ink: '#2A1F17',
   inkSoft: '#6B5843',
-  inkFaint: '#7E6A54',
+  inkFaint: '#72604C',
   leather: '#6E2620',
   leatherDeep: '#4F1915',
   leatherText: '#6E2620',
@@ -68,7 +68,7 @@ const light: Palette = {
   shadow: '#3B2A1A',
 };
 
-const dark: Palette = {
+export const dark: Palette = {
   scheme: 'dark',
   room: '#17110D',
   grain: 'rgba(226, 197, 142, 0.03)',
