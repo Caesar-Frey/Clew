@@ -9,17 +9,21 @@ import { Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AssistantProvider } from '@/ai/assistant';
 import { DataGate } from '@/components/DataGate';
 import { ReminderSync } from '@/components/ReminderSync';
+import { sweepPlaintextCaches } from '@/photos/tempFiles';
 import { LockGate } from '@/security/lock';
 import { DataProvider } from '@/state/data';
 import { fonts, usePalette } from '@/ui/theme';
 import { ToastProvider } from '@/ui/toast';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+// Plaintext photo copies left behind if the app was killed mid-capture.
+if (Platform.OS !== 'web') sweepPlaintextCaches();
 // The drawer fades into the reading room rather than snapping away.
 SplashScreen.setOptions({ fade: true, duration: 350 });
 

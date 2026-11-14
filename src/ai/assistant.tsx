@@ -1,8 +1,7 @@
-import { File, Paths } from 'expo-file-system';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
-import { base64ToBytes } from '../lib/base64';
+import { withTempJpeg } from '../photos/tempFiles';
 import { useData } from '../state/data';
 import { downloadModel, draftTags, embed, isInstalled, release, removeModels, type DownloadProgress } from './engine';
 import { EMBED_MODEL, VISION_MODELS, type VisionModel } from './models';
@@ -120,25 +119,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const suggest = useCallback<AssistantValue['suggest']>(
     async (input) => {
       if (status.state !== 'ready') return { name: null, tags: [] };
-      let temp: File | null = null;
-      let uri = input.photo?.uri ?? null;
-      if (!uri && input.photo?.base64) {
-        // llama.cpp reads images from a file; this one is deleted right after.
-        temp = new File(Paths.cache, `assistant-${Date.now()}.jpg`);
-        temp.create();
-        await temp.write(base64ToBytes(input.photo.base64));
-        uri = temp.uri;
-      }
-      try {
-        const knownTags = [...new Set(items.flatMap((i) => i.tags))];
-        return await draftTags(status.model, { ...input, photoUri: uri, knownTags, existing: input.existing });
-      } finally {
-        try {
-          temp?.delete();
-        } catch {
-          // Cache is cleared by the OS eventually.
-        }
-      }
+      const knownTags = [...new Set(items.flatMap((i) => i.tags))];
+      const run = (photoUri: string | null) => draftTags(status.model, { ...input, photoUri, knownTags, existing: input.existing });
+      if (input.photo?.uri) return run(input.photo.uri);
+      // llama.cpp reads images from a file; this one is deleted right after.
+      if (input.photo?.base64) return withTempJpeg(input.photo.base64, run);
+      return run(null);
     },
     [status, items],
   );

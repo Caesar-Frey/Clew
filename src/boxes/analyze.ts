@@ -3,6 +3,7 @@ import { extractTextFromImage, isSupported } from 'expo-text-extractor';
 import jpeg from 'jpeg-js';
 
 import { base64ToBytes } from '../lib/base64';
+import { deleteQuietly, withTempJpeg } from '../photos/tempFiles';
 import { centreSquare, labelText, labelWords, visualFeatures, type FingerprintView } from './fingerprint';
 
 const SIZE = 48;
@@ -20,8 +21,10 @@ export interface BoxAnalysis {
  * on-device) and a tiny centre-cropped thumbnail for the colour features.
  * Nothing is sent anywhere.
  */
-export async function analyzeBoxPhoto(uri: string): Promise<BoxAnalysis> {
-  const [text, pixels] = await Promise.all([readText(uri), thumbnailPixels(uri)]);
+export async function analyzeBoxPhoto(jpegBase64: string): Promise<BoxAnalysis> {
+  // OCR and the image tools read files, so the photo goes to a temp file
+  // that is deleted straight after.
+  const [text, pixels] = await withTempJpeg(jpegBase64, (uri) => Promise.all([readText(uri), thumbnailPixels(uri)]));
   const lines = text.lines;
   return {
     view: { ...visualFeatures(pixels.data, pixels.width, pixels.height), words: labelWords(lines), text: labelText(lines) },
@@ -49,6 +52,7 @@ async function thumbnailPixels(uri: string) {
     .resize({ width: SIZE, height: SIZE })
     .renderAsync();
   const small = await ref.saveAsync({ format: SaveFormat.JPEG, compress: 0.95, base64: true });
+  deleteQuietly(small.uri);
   const decoded = jpeg.decode(base64ToBytes(small.base64 ?? ''), { useTArray: true, formatAsRGBA: true });
   return { data: decoded.data as Uint8Array, width: decoded.width, height: decoded.height };
 }

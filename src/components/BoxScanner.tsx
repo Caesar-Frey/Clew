@@ -33,7 +33,7 @@ export async function scanBox(title: string): Promise<Scan | null> {
   const photo = await askForPhoto(title);
   if (!photo) return null;
   try {
-    return { photo, ...(await analyzeBoxPhoto(photo.uri)) };
+    return { photo, ...(await analyzeBoxPhoto(photo.data)) };
   } catch (e) {
     Alert.alert("Couldn't read that photo", e instanceof Error ? e.message : String(e));
     return null;

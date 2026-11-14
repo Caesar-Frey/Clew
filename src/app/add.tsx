@@ -154,7 +154,7 @@ export default function AddScreen() {
 
               <View style={styles.photoRow}>
                 {photos.map((ph, i) => (
-                  <View key={ph.uri}>
+                  <View key={ph.thumb.slice(-24) + i}>
                     <PhotoPlate base64={ph.thumb} aspect={1} style={{ width: 78 }} tilt={i % 2 ? 1.5 : -1.5} />
                     <Pressable
                       accessibilityRole="button"
@@ -186,7 +186,7 @@ export default function AddScreen() {
               <SuggestSubjects
                 name={name}
                 notes={notes}
-                photo={photos[0] ? { uri: photos[0].uri } : null}
+                photo={photos[0] ? { base64: photos[0].data } : null}
                 tags={tags}
                 onName={name.trim() ? undefined : setName}
                 onTag={(t) => {
