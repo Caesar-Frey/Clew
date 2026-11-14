@@ -38,6 +38,13 @@ describe('spokenQuery', () => {
     ['Where are the Christmas lights?', 'Christmas lights'],
     ['where did I put the drill', 'drill'],
     ['find spare keys', 'spare keys'],
+    ['where can I find the tent', 'tent'],
+    ['Do you know where my passport is?', 'passport'],
+    ["where's the drill at", 'drill'],
+    ['have you seen my glasses', 'glasses'],
+    ['wheres the charger', 'charger'],
+    ['drill', 'drill'],
+    ['the blue box', 'blue box'],
   ])('%s', (text, q) => expect(spokenQuery(text)).toBe(q));
 });
 

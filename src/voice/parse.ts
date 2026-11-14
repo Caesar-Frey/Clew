@@ -126,13 +126,35 @@ export function parseSpokenCard(raw: string): SpokenCard {
   return { ...empty, name: capitalize(stripArticle(text)) };
 }
 
-/** "where's my passport" -> "passport" */
+const QUESTION_START = new RegExp(
+  '^(?:' +
+    [
+      "(?:do|did) you know where",
+      "(?:have|has) (?:you|anyone) seen",
+      "where (?:can|could|do|did|might|should|would) i (?:find|get|look for|have put|have left|put|leave|keep)",
+      "where did i (?:put|leave)",
+      "where(?:'s|s| is| are| was| were)",
+      'can you find',
+      'find',
+      'look for',
+      'search(?: for)?',
+      'have i got',
+      'do i have',
+    ].join('|') +
+    ')\\s+',
+  'i',
+);
+
+/**
+ * "where's my passport" -> "passport". Used for typed queries too, so a
+ * question typed as a sentence still finds the thing.
+ */
 export function spokenQuery(raw: string): string {
   return stripArticle(
     clean(raw)
       .replace(FILLER, '')
-      .replace(/^(?:where(?:'s| is| are| did i (?:put|leave))|find|look for|search(?: for)?|have i got|do i have)\s+/i, '')
-      .replace(/\s+(?:go|again|now)$/i, ''),
+      .replace(QUESTION_START, '')
+      .replace(/\s+(?:go|gone|again|now|at|is|are|was|were|kept|stored)$/i, ''),
   );
 }
 
