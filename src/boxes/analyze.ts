@@ -37,7 +37,10 @@ async function readText(uri: string): Promise<{ lines: string[]; ocr: OcrResult 
   try {
     const lines = await extractTextFromImage(uri);
     return { lines, ocr: labelWords(lines).length ? 'read' : 'none' };
-  } catch {
+  } catch (e) {
+    // Android without Google Play services can't fetch or run ML Kit.
+    const message = e instanceof Error ? e.message : String(e);
+    if (/google play|play services|\bgms\b|waiting for the .*model to be downloaded/i.test(message)) return { lines: [], ocr: 'unavailable' };
     return { lines: [], ocr: 'failed' };
   }
 }

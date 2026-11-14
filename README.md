@@ -44,6 +44,10 @@ npx expo run:ios       # or: npx expo run:android
 
 Or build in the cloud with EAS: `npx eas-cli@latest build --profile development`.
 
+`npm install` runs llama.rn's postinstall, which downloads its prebuilt native libraries from GitHub, so installs need network access to github.com. In an offline or locked-down CI, set `RNLLAMA_SKIP_POSTINSTALL=1` for steps that only run tests or lint; native builds need the download.
+
+Build profiles live in `eas.json`: `development` (dev client, internal), `preview` (internal; APK on Android) and `production`. Bump `ios.buildNumber` and `android.versionCode` in `app.json` for every store upload; `runtimeVersion` follows the app version.
+
 `npx expo start --web` serves a design preview in the browser with sample data. It is unencrypted, in-memory, and not a supported target. Camera, voice and OCR aren't available there, and the assistant is simulated (a pretend download and canned suggestions) so its screens can be reviewed.
 
 ```bash

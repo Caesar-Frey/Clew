@@ -42,3 +42,19 @@ describe('database backup exclusion (iOS)', () => {
     expect(() => addExclusion('class AppDelegate {}')).toThrow(/didFinishLaunchingWithOptions/);
   });
 });
+
+describe('release config', () => {
+  it('runs the release plugin first so its removals win', () => {
+    expect(plugins[0]).toBe('./plugins/withReleaseConfig');
+  });
+
+  it('blocks permissions Clew never uses and versions the build', () => {
+    const blocked = (app.expo.android as { blockedPermissions?: string[] }).blockedPermissions ?? [];
+    for (const p of ['SYSTEM_ALERT_WINDOW', 'READ_MEDIA_IMAGES', 'READ_EXTERNAL_STORAGE', 'WRITE_EXTERNAL_STORAGE']) {
+      expect(blocked).toContain(`android.permission.${p}`);
+    }
+    expect(app.expo.android.versionCode).toBeGreaterThan(0);
+    expect(app.expo.ios.buildNumber).toBeTruthy();
+    expect(app.expo.runtimeVersion).toEqual({ policy: 'appVersion' });
+  });
+});
