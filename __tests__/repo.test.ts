@@ -331,3 +331,34 @@ describe('assistant data', () => {
     expect(await repo.listEmbeddings('m')).toHaveLength(0);
   });
 });
+
+describe('concurrency', () => {
+  it('runs overlapping actions one at a time, so none lands inside another transaction', async () => {
+    const { repo } = await testRepo();
+    const garage = await repo.ensureLocationPath(['Garage']);
+    const drill = await repo.addItem({ name: 'Drill', locationId: garage });
+    // All fired together, as when a save, a settings write and an embedding race on a phone.
+    await Promise.all([
+      repo.addItem({ name: 'Tent', placeNames: ['Attic', 'Suitcase'] }),
+      repo.setSetting('device.x', '1'),
+      repo.moveItem(drill, null),
+      repo.setEmbedding(drill, new Uint8Array(4), 'm'),
+      repo.renameLocation(garage, 'Shed'),
+      repo.lendItem(drill, { person: 'Sam' }),
+      repo.addItem({ name: 'Saw', locationId: garage }),
+    ]);
+    const items = await repo.listItems();
+    expect(items.map((i) => i.name).sort()).toEqual(['Drill', 'Saw', 'Tent']);
+    expect(await repo.getSetting('device.x')).toBe('1');
+  });
+
+  it('a failing action rolls back only its own writes', async () => {
+    const { repo } = await testRepo();
+    await Promise.all([
+      repo.addItem({ name: 'Tent', placeNames: ['Garage', 'x'.repeat(500)] }).catch(() => null),
+      repo.setSetting('device.y', '2'),
+    ]);
+    expect(await repo.getSetting('device.y')).toBe('2');
+    expect(await repo.listItems()).toEqual([]);
+  });
+});

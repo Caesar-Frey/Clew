@@ -125,7 +125,7 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
     /** Seals the whole catalog with `passphrase` and opens the share sheet. */
     exportArchive: async (passphrase: string, onProgress?: (f: number) => void) => {
       const now = Date.now();
-      const bytes = await sealArchive(await dumpCatalog(db, now), passphrase, { aead: nativeAead, randomBytes, onProgress });
+      const bytes = await sealArchive(await repo.exclusive(() => dumpCatalog(db, now)), passphrase, { aead: nativeAead, randomBytes, onProgress });
       await shareArchive(bytes, now);
       await repo.setSetting(LAST_BACKUP_KEY, String(now));
       await refresh();
@@ -133,7 +133,7 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
     openArchive: (bytes: Uint8Array, passphrase: string, onProgress?: (f: number) => void) =>
       openArchive(bytes, passphrase, { aead: nativeAead, randomBytes, onProgress }),
     /** Replaces everything with the archived catalog. */
-    restoreArchive: run((dump: CatalogDump) => restoreCatalog(db, dump)),
+    restoreArchive: run((dump: CatalogDump) => repo.exclusive(() => restoreCatalog(db, dump))),
 
     /** Adds a photo of a box (and what was read from it) to its fingerprint. */
     addBoxView: run(repo.addBoxView),

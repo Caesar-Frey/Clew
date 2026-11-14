@@ -7,6 +7,8 @@ import {
   type FingerprintView,
 } from '../boxes/fingerprint';
 import { buildLocationIndex, PATH_SEPARATOR } from '../lib/locations';
+
+import { createMutex, serializeAll } from './mutex';
 import type { BoxInfo, Db, HistoryEvent, Item, Loan, Location, Photo, PhotoInput, SqlValue } from './types';
 
 /** Everything needed to put a deleted item back. */
@@ -99,6 +101,7 @@ export type Repo = ReturnType<typeof createRepo>;
 
 export function createRepo(db: Db, deps: RepoDeps) {
   const { now, uuid } = deps;
+  const mutex = createMutex();
 
   async function listLocations(): Promise<Location[]> {
     const rows = await db.getAllAsync<LocationRow>('SELECT * FROM locations');
@@ -153,29 +156,33 @@ export function createRepo(db: Db, deps: RepoDeps) {
 
   async function renameLocation(id: string, name: string): Promise<void> {
     const clean = cleanName(name, 'Place');
-    const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
-    if (!loc) throw new Error('That place no longer exists');
-    const clash = await db.getFirstAsync<{ id: string }>(
-      `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
-      [loc.parent_id, clean, id],
-    );
-    if (clash) throw new Error(`There's already a place called "${clean}" here`);
-    await db.runAsync('UPDATE locations SET name = ? WHERE id = ?', [clean, id]);
+    await db.withTransactionAsync(async () => {
+      const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
+      if (!loc) throw new Error('That place no longer exists');
+      const clash = await db.getFirstAsync<{ id: string }>(
+        `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
+        [loc.parent_id, clean, id],
+      );
+      if (clash) throw new Error(`There's already a place called "${clean}" here`);
+      await db.runAsync('UPDATE locations SET name = ? WHERE id = ?', [clean, id]);
+    });
   }
 
   async function setLocationParent(id: string, parentId: string | null): Promise<void> {
-    if (parentId) {
-      const index = buildLocationIndex(await listLocations());
-      if (index.isWithin(parentId, id)) throw new Error("A place can't go inside itself");
-    }
-    const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
-    if (!loc) throw new Error('That place no longer exists');
-    const clash = await db.getFirstAsync<{ id: string }>(
-      `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
-      [parentId, loc.name, id],
-    );
-    if (clash) throw new Error(`There's already a place called "${loc.name}" there`);
-    await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [parentId, id]);
+    await db.withTransactionAsync(async () => {
+      if (parentId) {
+        const index = buildLocationIndex(await listLocations());
+        if (index.isWithin(parentId, id)) throw new Error("A place can't go inside itself");
+      }
+      const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
+      if (!loc) throw new Error('That place no longer exists');
+      const clash = await db.getFirstAsync<{ id: string }>(
+        `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
+        [parentId, loc.name, id],
+      );
+      if (clash) throw new Error(`There's already a place called "${loc.name}" there`);
+      await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [parentId, id]);
+    });
   }
 
   /**
@@ -725,38 +732,49 @@ export function createRepo(db: Db, deps: RepoDeps) {
     return Object.fromEntries(rows.map((r) => [r.key, r.value]));
   }
 
+  const api = serializeAll(
+    {
+      allSettings,
+      listBoxes,
+      setFingerprint,
+      addBoxView,
+      listEmbeddings,
+      staleEmbeddings,
+      setEmbedding,
+      clearBox,
+      listLocations,
+      ensureLocationPath,
+      renameLocation,
+      setLocationParent,
+      deleteLocation,
+      addItem,
+      updateItem,
+      moveItem,
+      undoMove,
+      deleteItem,
+      restoreItem,
+      addPhoto,
+      getPhoto,
+      deletePhoto,
+      lendItem,
+      returnItem,
+      undoReturn,
+      setLoanDue,
+      listItems,
+      itemHistory,
+      knownPeople,
+      getSetting,
+      setSetting,
+    },
+    mutex,
+  );
   return {
-    allSettings,
-    listBoxes,
-    setFingerprint,
-    addBoxView,
-    listEmbeddings,
-    staleEmbeddings,
-    setEmbedding,
-    clearBox,
-    listLocations,
-    ensureLocationPath,
-    renameLocation,
-    setLocationParent,
-    deleteLocation,
-    addItem,
-    updateItem,
-    moveItem,
-    undoMove,
-    deleteItem,
-    restoreItem,
-    addPhoto,
-    getPhoto,
-    deletePhoto,
-    lendItem,
-    returnItem,
-    undoReturn,
-    setLoanDue,
-    listItems,
-    itemHistory,
-    knownPeople,
-    getSetting,
-    setSetting,
+    ...api,
+    /**
+     * Runs other database work (backup, restore) with the same one-at-a-time
+     * rule as every repo call.
+     */
+    exclusive: <T>(task: () => Promise<T>) => mutex.run(task),
   };
 }
 
