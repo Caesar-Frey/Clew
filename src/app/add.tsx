@@ -60,6 +60,10 @@ export default function AddScreen() {
     if (card.person) {
       setLent(true);
       setLoan({ person: card.person, dueAt: card.dueInDays ? daysFromNow(card.dueInDays) : null });
+      if (!card.name && !name.trim()) {
+        setError('What did you lend? Type its name.');
+        nameRef.current?.focus();
+      }
     } else if (card.place.length) {
       setLent(false);
       // A spoken place that exists is chosen; anything else waits in the
