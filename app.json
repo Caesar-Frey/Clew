@@ -83,8 +83,8 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Clew listens when you tap the microphone, so you can add or find things by voice. Audio never leaves your phone.",
-          "speechRecognitionPermission": "Clew turns what you say into a catalog card, on your phone.",
+          "microphonePermission": "Clew listens when you tap the microphone, so you can add or find things by voice.",
+          "speechRecognitionPermission": "Clew turns what you say into a catalog card. Where the phone can, this happens on the phone; otherwise Clew asks before using Apple's speech service.",
           "androidSpeechServicePackages": [
             "com.google.android.as",
             "com.google.android.googlequicksearchbox"

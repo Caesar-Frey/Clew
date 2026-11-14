@@ -219,6 +219,7 @@ export default function DeskScreen() {
             <Rule text="Your catalog is encrypted with a key kept in the phone's secure keychain." />
             <Rule text="Backups are sealed with your passphrase before they leave the app." />
             <Rule text="No ads, no analytics, no tracking. The app only goes online to download the optional assistant, if you ask it to." />
+            <Rule text="Voice uses the phone's own speech recognition. Where that would send audio to Apple or Google, Clew asks first." />
           </View>
         </IndexCard>
 
