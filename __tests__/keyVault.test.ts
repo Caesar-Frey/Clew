@@ -43,7 +43,19 @@ jest.mock('../src/backup/device', () => {
   };
 });
 
-import { getKeyMode, KeyLockedError, newKey, readKey, recoverKey, SealIncompleteError, sealKey, storeNewKey, unsealKey } from '../src/security/keyVault';
+import {
+  forgetKeys,
+  getKeyMode,
+  hasRecovery,
+  KeyLockedError,
+  newKey,
+  readKey,
+  recoverKey,
+  SealIncompleteError,
+  sealKey,
+  storeNewKey,
+  unsealKey,
+} from '../src/security/keyVault';
 
 const PLAIN = 'whereabouts.dbkey.v1';
 
@@ -108,5 +120,66 @@ describe('key vault', () => {
     mockStore.failDeletes = 0;
     expect(await readKey()).toBe(key);
     expect(mockStore.items.has(PLAIN)).toBe(false);
+  });
+  it('changes nothing when the seal prompt is cancelled', async () => {
+    const key = await freshKey();
+    mockStore.biometrics = 'cancel';
+    await expect(sealKey('correct horse battery')).rejects.toThrow(/cancelled/);
+    expect(await getKeyMode()).toBe('device');
+    expect(mockStore.items.get(PLAIN)).toBe(key);
+    expect(await hasRecovery()).toBe(true); // harmless: unused until the mode says sealed
+    expect(mockStore.items.size).toBe(2);
+    mockStore.biometrics = 'ok';
+    expect(await readKey()).toBe(key);
+  });
+
+  it('refuses to seal without a key, and sealing or unsealing twice does nothing more', async () => {
+    await expect(sealKey('correct horse battery')).rejects.toThrow(/No catalog key/);
+    const key = await freshKey();
+    await unsealKey();
+    expect(await getKeyMode()).toBe('device');
+    await sealKey('correct horse battery');
+    await sealKey('another phrase entirely');
+    // The second call was a no-op, so the first passphrase still recovers.
+    mockStore.biometrics = 'invalidated';
+    await recoverKey('correct horse battery');
+    expect(await readKey()).toBe(key);
+  });
+
+  it('unsealing drops the old recovery passphrase; sealing again uses only the new one', async () => {
+    const key = await freshKey();
+    await sealKey('first phrase here');
+    expect(await hasRecovery()).toBe(true);
+    await unsealKey();
+    expect(await hasRecovery()).toBe(false);
+    await expect(recoverKey('first phrase here')).rejects.toThrow(/No recovery passphrase/);
+    await sealKey('second phrase here');
+    mockStore.biometrics = 'invalidated';
+    await expect(recoverKey('first phrase here')).rejects.toThrow(/isn't right/);
+    await recoverKey('second phrase here');
+    expect(await getKeyMode()).toBe('device');
+    expect(await hasRecovery()).toBe(false);
+    expect(await readKey()).toBe(key);
+  });
+
+  it('a sealed key can be locked out and recovered more than once', async () => {
+    const key = await freshKey();
+    for (const phrase of ['round one words', 'round two words']) {
+      await sealKey(phrase);
+      mockStore.biometrics = 'invalidated';
+      await expect(readKey()).rejects.toBeInstanceOf(KeyLockedError);
+      await recoverKey(phrase);
+      mockStore.biometrics = 'ok';
+      expect(await readKey()).toBe(key);
+    }
+  });
+
+  it('forgets every key and the recovery copy', async () => {
+    await freshKey();
+    await sealKey('correct horse battery');
+    await forgetKeys();
+    expect(mockStore.items.size).toBe(0);
+    expect(await getKeyMode()).toBe('device');
+    expect(await readKey()).toBeNull();
   });
 });
