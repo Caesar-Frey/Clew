@@ -199,6 +199,52 @@ describe('loans', () => {
     expect(kinds).toEqual(['lent', 'returned', 'lent']);
     expect(await repo.knownPeople()).toEqual(['Alex', 'Sam']);
   });
+
+  it('undoing a return does nothing once the item is lent again', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Drill', lendTo: { person: 'Sam' } });
+    const first = await repo.returnItem(id);
+    await repo.lendItem(id, { person: 'Alex' });
+    await repo.undoReturn(first!);
+    expect((await repo.listItems())[0]!.activeLoan).toMatchObject({ person: 'Alex' });
+    expect(await repo.returnItem(id)).not.toBeNull();
+    expect(await repo.returnItem(id)).toBeNull();
+  });
+
+  it('undoing a lend removes it from the history, but not once it was returned', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Tent' });
+    const loan = await repo.lendItem(id, { person: 'Sam' });
+    await repo.undoLend(loan);
+    expect((await repo.listItems())[0]!.activeLoan).toBeNull();
+    expect((await repo.itemHistory(id)).map((h) => h.kind)).not.toContain('lent');
+
+    const again = await repo.lendItem(id, { person: 'Sam' });
+    await repo.returnItem(id);
+    await repo.undoLend(again);
+    expect((await repo.itemHistory(id)).map((h) => h.kind)).toEqual(expect.arrayContaining(['lent', 'returned']));
+  });
+
+  it('changes and clears a due date, and moving a lent item keeps the loan', async () => {
+    const { repo } = await testRepo();
+    const shed = await repo.ensureLocationPath(['Shed']);
+    const id = await repo.addItem({ name: 'Saw', lendTo: { person: 'Sam', dueAt: 100 } });
+    const loanId = (await repo.listItems())[0]!.activeLoan!.id;
+    await repo.setLoanDue(loanId, 200);
+    expect((await repo.listItems())[0]!.activeLoan).toMatchObject({ dueAt: 200 });
+    await repo.setLoanDue(loanId, null);
+    expect((await repo.listItems())[0]!.activeLoan!.dueAt).toBeNull();
+    await repo.moveItem(id, shed);
+    expect((await repo.listItems())[0]).toMatchObject({ locationId: shed, activeLoan: { person: 'Sam' } });
+  });
+
+  it('two quick lends of the same thing leave exactly one loan', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Ladder' });
+    const results = await Promise.allSettled([repo.lendItem(id, { person: 'Sam' }), repo.lendItem(id, { person: 'Alex' })]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect((await repo.itemHistory(id)).filter((h) => h.kind === 'lent')).toHaveLength(1);
+  });
 });
 
 describe('settings', () => {
