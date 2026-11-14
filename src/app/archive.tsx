@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { checkPassphrase, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
 import { pickArchive } from '@/backup/device';
-import { shortDate, stampDate } from '@/lib/format';
+import { replaceSummary, shortDate, stampDate } from '@/lib/format';
 import { useData } from '@/state/data';
 import { IndexCard, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
@@ -116,7 +116,7 @@ type Picked = { name: string; bytes: Uint8Array; createdAt: number; summary: Arc
 
 function RestoreFlow() {
   const p = usePalette();
-  const { actions, items } = useData();
+  const { actions, items, locations, boxes } = useData();
   const [picked, setPicked] = useState<Picked | null>(null);
   const [pass, setPass] = useState('');
   const [show, setShow] = useState(false);
@@ -159,10 +159,10 @@ function RestoreFlow() {
     } finally {
       setProgress(null);
     }
-    if (items.length === 0) return replace(dump);
+    if (items.length === 0 && locations.length === 0 && boxes.size === 0) return replace(dump);
     Alert.alert(
       'Replace this catalog?',
-      `The ${items.length} ${items.length === 1 ? 'thing' : 'things'} on this phone will be replaced by the backup. This can't be undone.`,
+      `${replaceSummary(items.length, locations.length)} on this phone will be replaced by the backup. This can't be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Replace', style: 'destructive', onPress: () => replace(dump) },

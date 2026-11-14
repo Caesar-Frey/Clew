@@ -80,3 +80,12 @@ export function relativeDays(t: number, now = Date.now()): string {
 export function olderThan(t: number | null, ms: number, now = Date.now()): boolean {
   return t === null || now - t > ms;
 }
+
+/** "The 3 things and 2 places" / "The 1 place" for the replace warning. */
+export function replaceSummary(things: number, places: number): string {
+  const parts = [
+    things ? `${things} ${things === 1 ? 'thing' : 'things'}` : null,
+    places ? `${places} ${places === 1 ? 'place' : 'places'}` : null,
+  ].filter(Boolean);
+  return parts.length ? `The ${parts.join(' and ')}` : 'Everything';
+}
