@@ -6,6 +6,7 @@ import {
   checkPassphrase,
   BackupTooLargeError,
   dumpCatalog,
+  NewerArchiveError,
   NotAnArchiveError,
   passphraseStrength,
   reRootBrokenPlaces,
@@ -198,5 +199,43 @@ describe('archive', () => {
     await target.repo.addItem({ name: 'Keep me', placeNames: ['Drawer'] });
     await expect(restoreCatalog(target.db, dump)).rejects.toThrow();
     expect((await target.repo.listItems()).map((i) => i.name)).toEqual(['Keep me']);
+  });
+  it("replaces the whole catalog but keeps this phone's own settings", async () => {
+    const source = await sampleCatalog();
+    const dump = await dumpCatalog(source.db, 1);
+    const target = await testRepo();
+    await target.repo.addItem({ name: 'Old thing', placeNames: ['Old place'] });
+    await target.repo.setSetting('device.hapticsOff', '1');
+    await target.repo.setSetting('reminders.on', '0');
+    await restoreCatalog(target.db, dump);
+    expect((await target.repo.listItems()).map((i) => i.name).sort()).toEqual(['Drill', 'Ladder']);
+    expect((await target.repo.listLocations()).map((l) => l.name)).not.toContain('Old place');
+    expect(await target.repo.getSetting('device.hapticsOff')).toBe('1');
+    expect(await target.repo.getSetting('reminders.on')).toBe('1');
+    // The source phone's notification ids never come across.
+    expect(await target.repo.getSetting('device.notificationIds')).toBeNull();
+  });
+
+  it('refuses a backup from a newer app and ignores columns it does not know', async () => {
+    const source = await sampleCatalog();
+    const newer = await dumpCatalog(source.db, 1);
+    newer.schemaVersion += 1;
+    const target = await testRepo();
+    await expect(restoreCatalog(target.db, newer)).rejects.toBeInstanceOf(NewerArchiveError);
+
+    const extra = await dumpCatalog(source.db, 1);
+    for (const row of extra.tables.items!) row['colour; DROP TABLE items'] = 'red';
+    await restoreCatalog(target.db, extra);
+    expect(await target.repo.listItems()).toHaveLength(2);
+  });
+
+  it('restores an empty catalog to an empty catalog', async () => {
+    const empty = await testRepo();
+    const dump = await dumpCatalog(empty.db, 1);
+    const target = await testRepo();
+    await target.repo.addItem({ name: 'Gone after restore' });
+    await restoreCatalog(target.db, dump);
+    expect(await target.repo.listItems()).toEqual([]);
+    expect(await target.repo.listLocations()).toEqual([]);
   });
 });
