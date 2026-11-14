@@ -6,12 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LoanFields, type LoanValue } from '@/components/LoanFields';
 import { askForPhoto, PhotoPlate } from '@/components/PhotoPlate';
-import { PlacePicker } from '@/components/PlacePicker';
+import { PlacePicker, usePlaceField } from '@/components/PlacePicker';
 import { tagList, withTag } from '@/ai/text';
 import { SuggestSubjects } from '@/components/SuggestSubjects';
 import { VoiceButton } from '@/components/VoiceButton';
 import { daysFromNow } from '@/lib/format';
 import { PATH_SEPARATOR } from '@/lib/locations';
+import { findPath, NO_PLACE } from '@/lib/placeQuery';
 import type { CapturedPhoto } from '@/photos/capture';
 import { parseSpokenCard, resolveSpokenPlace } from '@/voice/parse';
 import { useDictation } from '@/voice/useDictation';
@@ -23,13 +24,13 @@ import { usePalette } from '@/ui/theme';
 export default function AddScreen() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ name?: string; place?: string }>();
+  const params = useLocalSearchParams<{ name?: string; placeId?: string }>();
   const { actions, locations, index, people, items } = useData();
   const nameRef = useRef<TextInputInstance>(null);
   const placeRef = useRef<TextInputInstance>(null);
 
   const [name, setName] = useState(params.name ?? '');
-  const [place, setPlace] = useState(params.place ?? '');
+  const place = usePlaceField(params.placeId ? { kind: 'existing', id: params.placeId } : NO_PLACE);
   const [lent, setLent] = useState(false);
   const [loan, setLoan] = useState<LoanValue>({ person: '', dueAt: null });
   const [more, setMore] = useState(false);
@@ -50,7 +51,15 @@ export default function AddScreen() {
       setLoan({ person: card.person, dueAt: card.dueInDays ? daysFromNow(card.dueInDays) : null });
     } else if (card.place.length) {
       setLent(false);
-      setPlace(resolveSpokenPlace(card.place, locations, index).join(PATH_SEPARATOR));
+      // A spoken place that exists is chosen; anything else waits in the
+      // field for the user to pick a match or create it.
+      const path = resolveSpokenPlace(card.place, locations, index).join(PATH_SEPARATOR);
+      const id = findPath(path, index);
+      if (id) place.reset({ kind: 'existing', id });
+      else {
+        place.reset();
+        place.setQuery(path);
+      }
     }
   });
   const listen = () => {
@@ -66,12 +75,16 @@ export default function AddScreen() {
       setError(!name.trim() ? 'Give it a name first.' : 'Who did you lend it to?');
       return;
     }
+    if (place.pending) {
+      setError(`Pick a place from the list, or tap “Create new place”.`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await actions.addItem({
         name,
-        place,
+        place: place.value,
         notes,
         tags: tagList(tags),
         aiTags: aiTags.filter((t) => tagList(tags).includes(t)),
@@ -192,20 +205,16 @@ export default function AddScreen() {
                 <LoanFields value={loan} onChange={setLoan} autoFocus />
               ) : (
                 <PlacePicker
+                  field={place}
                   inputRef={placeRef}
-                  value={place}
-                  onChange={setPlace}
+                  contextId={params.placeId}
                   autoFocus={!!params.name}
-                  onSubmit={() => save(false)}
+                  onPicked={() => placeRef.current?.blur()}
                 />
               )}
 
               {lent && (
-                <PlacePicker
-                  value={place}
-                  onChange={setPlace}
-                  label="Where it goes when it's back (optional)"
-                />
+                <PlacePicker field={place} label="Where it goes when it's back (optional)" contextId={params.placeId} />
               )}
 
               {more ? (

@@ -1,8 +1,10 @@
 import { buildLocationIndex, parsePathInput } from '../src/lib/locations';
 
 describe('parsePathInput', () => {
-  it('splits on > / and ›', () => {
-    expect(parsePathInput(' House > Garage /  Blue   box › ')).toEqual(['House', 'Garage', 'Blue box']);
+  it('splits on > and › only', () => {
+    expect(parsePathInput(' House > Garage ›  Blue   box › ')).toEqual(['House', 'Garage', 'Blue box']);
+    expect(parsePathInput('Lounge > TV/Media shelf')).toEqual(['Lounge', 'TV/Media shelf']);
+    expect(parsePathInput('C:\\Drawer')).toEqual(['C:\\Drawer']);
     expect(parsePathInput('   ')).toEqual([]);
   });
 });

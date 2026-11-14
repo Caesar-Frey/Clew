@@ -8,6 +8,18 @@ import { openEncryptedDatabase } from '../db/open';
 import { createRepo, type Repo } from '../db/repo';
 import type { BoxInfo, Db, Item, Location, PhotoInput } from '../db/types';
 import { buildLocationIndex, parsePathInput, type LocationIndex } from '../lib/locations';
+import { findPath, type PlaceValue } from '../lib/placeQuery';
+
+/** Creating a place that's already there. */
+export class PlaceExistsError extends Error {
+  constructor(
+    readonly id: string,
+    name: string,
+  ) {
+    super(`${name} already exists.`);
+    this.name = 'PlaceExistsError';
+  }
+}
 
 export interface Snapshot {
   items: Item[];
@@ -48,27 +60,36 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
       return result;
     };
 
-  /** Resolves "Garage › Blue box" to a place id, creating what's missing. */
-  const placeFromPath = async (path: string): Promise<string | null> => {
-    const names = parsePathInput(path);
-    return names.length ? repo.ensureLocationPath(names) : null;
+  /** The id of a chosen place, creating it first if the user chose "Create new place". */
+  const resolvePlace = async (place: PlaceValue): Promise<string | null> => {
+    if (place.kind === 'existing') return place.id;
+    if (place.kind === 'new') return repo.ensureLocationPath(place.names, place.parentId);
+    return null;
   };
 
   return {
     addItem: run(
       (input: {
         name: string;
-        place: string;
+        place: PlaceValue;
         notes?: string;
         tags?: string[];
         lendTo?: { person: string; dueAt: number | null };
         photos?: PhotoInput[];
         aiTags?: string[];
-      }) => repo.addItem({ ...input, placeNames: parsePathInput(input.place) }),
+      }) => {
+        const { place, ...rest } = input;
+        return repo.addItem({
+          ...rest,
+          locationId: place.kind === 'existing' ? place.id : null,
+          placeNames: place.kind === 'new' ? place.names : undefined,
+          placeParentId: place.kind === 'new' ? place.parentId : null,
+        });
+      },
     ),
     updateItem: run(repo.updateItem),
-    moveItem: run(async (id: string, place: string | { locationId: string | null }) => {
-      const locationId = typeof place === 'string' ? await placeFromPath(place) : place.locationId;
+    moveItem: run(async (id: string, place: PlaceValue | { locationId: string | null }) => {
+      const locationId = 'kind' in place ? await resolvePlace(place) : place.locationId;
       return repo.moveItem(id, locationId);
     }),
     undoMove: run(repo.undoMove),
@@ -81,9 +102,19 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
     returnItem: run(repo.returnItem),
     undoReturn: run(repo.undoReturn),
     setLoanDue: run(repo.setLoanDue),
-    addPlace: run(async (path: string, parentId: string | null = null) =>
-      repo.ensureLocationPath(parsePathInput(path), parentId),
-    ),
+    /**
+     * Creates a place from a typed path below `parentId`. If the whole path
+     * already exists, throws PlaceExistsError carrying its id so the screen
+     * can say so and open it.
+     */
+    addPlace: run(async (path: string, parentId: string | null = null) => {
+      const names = parsePathInput(path);
+      if (names.length === 0) throw new Error('Type a place name.');
+      const index = buildLocationIndex(await repo.listLocations());
+      const existing = findPath(names.join(' > '), index, parentId);
+      if (existing) throw new PlaceExistsError(existing, index.byId.get(existing)!.name);
+      return repo.ensureLocationPath(names, parentId);
+    }),
     renamePlace: run(repo.renameLocation),
     setPlaceParent: run(repo.setLocationParent),
     deletePlace: run(repo.deleteLocation),

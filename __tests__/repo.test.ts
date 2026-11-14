@@ -107,6 +107,16 @@ describe('items', () => {
     expect(item!.activeLoan).toMatchObject({ itemId: id, person: 'Sam', dueAt: 9 });
   });
 
+  it('creates a chosen new place inside the given parent, not at the top level', async () => {
+    const { repo } = await testRepo();
+    const garage = await repo.ensureLocationPath(['House', 'Garage']);
+    await repo.addItem({ name: 'Drill', placeNames: ['Blue box'], placeParentId: garage });
+    const [item] = await repo.listItems();
+    const index = buildLocationIndex(await repo.listLocations());
+    expect(index.pathString(item!.locationId)).toBe('House › Garage › Blue box');
+    expect(index.children.get(null)!.map((l) => l.name)).toEqual(['House']);
+  });
+
   it('saves nothing when part of an add fails, so retrying cannot duplicate', async () => {
     const { repo } = await testRepo();
     await expect(

@@ -5,7 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useBoxMatcher } from '@/components/BoxScanner';
 import { ItemCard } from '@/components/ItemCard';
-import { useData } from '@/state/data';
+import { PlaceExistsError, useData } from '@/state/data';
+import { useToast } from '@/ui/toast';
 import { IndexCard, LibraryButton, Room, SectionLabel, spineColor, Stamp, T, TypedInput } from '@/ui/components';
 import { CameraIcon, ChevronIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
@@ -19,6 +20,7 @@ export default function ShelvesScreen() {
   const [newPath, setNewPath] = useState('');
   const [error, setError] = useState<string | null>(null);
   const { hasBoxes } = useBoxMatcher();
+  const toast = useToast();
 
   const roots = useMemo(() => index.children.get(null) ?? [], [index]);
   const counts = useMemo(() => {
@@ -38,6 +40,14 @@ export default function ShelvesScreen() {
       setAdding(false);
       setError(null);
     } catch (e) {
+      if (e instanceof PlaceExistsError) {
+        setNewPath('');
+        setAdding(false);
+        setError(null);
+        toast({ message: e.message });
+        router.push({ pathname: '/place/[id]', params: { id: e.id } });
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
     }
   };

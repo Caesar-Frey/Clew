@@ -294,8 +294,9 @@ export function createRepo(db: Db, deps: RepoDeps) {
     name: string;
     /** An existing place, or */
     locationId?: string | null;
-    /** a path to find or create, root first. */
+    /** a path to find or create, starting below `placeParentId` (or the root). */
     placeNames?: string[];
+    placeParentId?: string | null;
     notes?: string | null;
     tags?: string[];
     /** Subjects suggested by the assistant and approved. */
@@ -310,7 +311,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
     const t = now();
     await db.withTransactionAsync(async () => {
       const locationId = input.placeNames?.length
-        ? await ensureLocationPath(input.placeNames)
+        ? await ensureLocationPath(input.placeNames, input.placeParentId ?? null)
         : (input.locationId ?? null);
       const toPath = await pathString(locationId);
       await db.runAsync(

@@ -35,6 +35,8 @@ export interface Palette {
   brassDark: string;
   stamp: string;
   stampReturned: string;
+  /** Background of the highlighted (Return-picks-this) suggestion row. */
+  highlight: string;
   shadow: string;
 }
 
@@ -62,6 +64,7 @@ const light: Palette = {
   brassDark: '#7C5D2C',
   stamp: '#B23A31',
   stampReturned: '#3D6B52',
+  highlight: '#E4ECE2',
   shadow: '#3B2A1A',
 };
 
@@ -89,6 +92,7 @@ const dark: Palette = {
   brassDark: '#8A6935',
   stamp: '#E37468',
   stampReturned: '#6FA584',
+  highlight: '#22332A',
   shadow: '#000000',
 };
 

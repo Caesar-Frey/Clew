@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BoxFingerprintCard } from '@/components/BoxFingerprintCard';
 import { ItemCard } from '@/components/ItemCard';
 import { callNumber } from '@/lib/format';
-import { useData } from '@/state/data';
+import { PlaceExistsError, useData } from '@/state/data';
+import { useToast } from '@/ui/toast';
 import { LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
 import { BinIcon, NewCardIcon, PencilIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
@@ -20,6 +21,7 @@ export default function PlaceScreen() {
   const [mode, setMode] = useState<'view' | 'rename' | 'inside'>('view');
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const here = useMemo(() => items.filter((i) => i.locationId === id), [items, id]);
   const nestedCount = useMemo(() => {
@@ -47,6 +49,13 @@ export default function PlaceScreen() {
       setMode('view');
       setError(null);
     } catch (e) {
+      if (e instanceof PlaceExistsError) {
+        setMode('view');
+        setError(null);
+        toast({ message: e.message });
+        router.push({ pathname: '/place/[id]', params: { id: e.id } });
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -109,7 +118,7 @@ export default function PlaceScreen() {
             style={{ flex: 1 }}
             label="Add a thing here"
             icon={(c) => <NewCardIcon size={20} color={c} />}
-            onPress={() => router.push({ pathname: '/add', params: { place: index.pathString(id) } })}
+            onPress={() => router.push({ pathname: '/add', params: { placeId: id } })}
           />
         </View>
 
