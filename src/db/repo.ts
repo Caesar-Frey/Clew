@@ -192,8 +192,10 @@ export function createRepo(db: Db, deps: RepoDeps) {
   async function deleteLocation(id: string): Promise<void> {
     const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
     if (!loc) return;
-    const fromPath = await pathString(id);
-    const toPath = await pathString(loc.parent_id);
+    const before = buildLocationIndex(await listLocations());
+    const pathBefore = (x: string) => (before.byId.has(x) ? before.pathString(x) : null);
+    const fromPath = pathBefore(id);
+    const toPath = loc.parent_id ? pathBefore(loc.parent_id) : null;
     await db.withTransactionAsync(async () => {
       const items = await db.getAllAsync<{ id: string }>('SELECT id FROM items WHERE location_id = ?', [id]);
       const t = now();
@@ -221,7 +223,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
           [loc.parent_id, child.name, child.id],
         );
         if (clash) {
-          await mergeInto(child.id, clash.id);
+          await mergeInto(child.id, clash.id, pathBefore);
         } else {
           await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [loc.parent_id, child.id]);
         }
@@ -230,18 +232,67 @@ export function createRepo(db: Db, deps: RepoDeps) {
     });
   }
 
-  async function mergeInto(sourceId: string, targetId: string): Promise<void> {
-    await db.runAsync('UPDATE items SET location_id = ? WHERE location_id = ?', [targetId, sourceId]);
+  /**
+   * Merges one place into another: its things (with a history entry each),
+   * its nested places, and its box photos and fingerprint views, keeping the
+   * newest views up to the cap. `pathOf` gives paths as they were before the
+   * delete started, for the history.
+   */
+  async function mergeInto(sourceId: string, targetId: string, pathOf: (id: string) => string | null): Promise<void> {
+    const t = now();
+    const items = await db.getAllAsync<{ id: string }>('SELECT id FROM items WHERE location_id = ?', [sourceId]);
+    for (const item of items) {
+      await db.runAsync(
+        `INSERT INTO moves (id, item_id, from_location_id, to_location_id, from_path, to_path, moved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [uuid(), item.id, sourceId, targetId, pathOf(sourceId), pathOf(targetId), t],
+      );
+    }
+    await db.runAsync('UPDATE items SET location_id = ?, updated_at = ? WHERE location_id = ?', [targetId, t, sourceId]);
+    await mergeBoxes(sourceId, targetId);
     const children = await db.getAllAsync<LocationRow>('SELECT * FROM locations WHERE parent_id = ?', [sourceId]);
     for (const child of children) {
       const clash = await db.getFirstAsync<{ id: string }>(
         `SELECT id FROM locations WHERE parent_id = ? AND name = ? COLLATE NOCASE`,
         [targetId, child.name],
       );
-      if (clash) await mergeInto(child.id, clash.id);
+      if (clash) await mergeInto(child.id, clash.id, pathOf);
       else await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [targetId, child.id]);
     }
     await db.runAsync('DELETE FROM locations WHERE id = ?', [sourceId]);
+  }
+
+  /** Moves box photos and fingerprint views from one place to another (before the source is deleted). */
+  async function mergeBoxes(sourceId: string, targetId: string): Promise<void> {
+    const rows = await db.getAllAsync<{ id: string; fingerprint: Uint8Array | null }>(
+      'SELECT id, fingerprint FROM locations WHERE id IN (?, ?)',
+      [sourceId, targetId],
+    );
+    const fpOf = (id: string) => {
+      const raw = rows.find((r) => r.id === id)?.fingerprint;
+      return decodeFingerprint(raw ? new Uint8Array(raw) : null);
+    };
+    const source = fpOf(sourceId);
+    await db.runAsync('UPDATE photos SET location_id = ? WHERE location_id = ?', [targetId, sourceId]);
+    if (!source?.views.length) return;
+    const target = fpOf(targetId);
+    // Newest first by their photo's date; views saved without a photo id count as oldest.
+    const photos = await db.getAllAsync<{ id: string; created_at: number }>('SELECT id, created_at FROM photos WHERE location_id = ?', [
+      targetId,
+    ]);
+    const when = new Map(photos.map((p) => [p.id, p.created_at]));
+    const all = [...(target?.views ?? []), ...source.views];
+    const ordered = all
+      .map((v, i) => ({ v, at: (v.photoId && when.get(v.photoId)) || 0, i }))
+      .sort((a, b) => a.at - b.at || a.i - b.i)
+      .map((x) => x.v);
+    const kept = ordered.slice(-MAX_VIEWS);
+    for (const v of ordered.slice(0, -MAX_VIEWS)) if (v.photoId) await db.runAsync('DELETE FROM photos WHERE id = ?', [v.photoId]);
+    await db.runAsync('UPDATE locations SET fingerprint = ?, fingerprint_model = ? WHERE id = ?', [
+      encodeFingerprint({ v: 1, views: kept }),
+      FINGERPRINT_MODEL,
+      targetId,
+    ]);
   }
 
   /**

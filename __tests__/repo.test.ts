@@ -62,6 +62,30 @@ describe('locations', () => {
     expect((await repo.listLocations()).map((l) => l.name).sort()).toEqual(['Garage', 'Shelf']);
   });
 
+  it('keeps box photos, fingerprint views and history when a merge removes a place', async () => {
+    const { repo } = await testRepo();
+    const innerShelf = await repo.ensureLocationPath(['Garage', 'Cupboard', 'Shelf']);
+    const outerShelf = await repo.ensureLocationPath(['Garage', 'Shelf']);
+    const glue = await repo.addItem({ name: 'Glue', locationId: innerShelf });
+    const v = (n: number) => ({ words: [], text: '', hist: [n], grid: [] });
+    const photo = { data: 'd', thumb: 't', width: 1, height: 1 };
+    for (let i = 0; i < 4; i++) await repo.addBoxView(outerShelf, v(i), photo);
+    const fromInner: string[] = [];
+    for (let i = 0; i < 3; i++) fromInner.push(await repo.addBoxView(innerShelf, v(10 + i), photo));
+
+    const cupboard = (await repo.listLocations()).find((l) => l.name === 'Cupboard')!;
+    await repo.deleteLocation(cupboard.id);
+
+    const box = (await repo.listBoxes()).find((b) => b.locationId === outerShelf)!;
+    const fp = decodeFingerprint(box.fingerprint)!;
+    expect(fp.views).toHaveLength(MAX_VIEWS);
+    // The newest views (from the merged shelf) survive, with their photos.
+    expect(fp.views.slice(-3).map((x) => x.photoId)).toEqual(fromInner);
+    expect(new Set(box.photoIds)).toEqual(new Set(fp.views.map((x) => x.photoId)));
+    const history = await repo.itemHistory(glue);
+    expect(history[0]).toMatchObject({ kind: 'moved', fromPath: 'Garage › Cupboard › Shelf', toPath: 'Garage › Shelf' });
+  });
+
   it('keeps contents when deleting a place whose child has the same name', async () => {
     const { repo } = await testRepo();
     const inner = await repo.ensureLocationPath(['Garage', 'Box', 'Box']);
