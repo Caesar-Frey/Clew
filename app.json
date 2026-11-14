@@ -91,7 +91,8 @@
           ]
         }
       ],
-      "llama.rn"
+      "llama.rn",
+      "./plugins/withDbExcludedFromBackup"
     ],
     "experiments": {
       "typedRoutes": false

@@ -3,6 +3,8 @@ import { forwardRef, useEffect, type ReactNode } from 'react';
 import {
   Animated,
   Easing,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -334,6 +336,18 @@ export function Stamp({
 
 /* ----------------------------------------------------------------- input */
 
+/**
+ * Keeps focused inputs and the buttons under them above the keyboard. Android
+ * draws edge-to-edge (SDK 58), so it needs an explicit behaviour too.
+ */
+export function KeyboardScreen({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return (
+    <KeyboardAvoidingView style={[{ flex: 1 }, style]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 export const TypedInput = forwardRef<TextInputInstance, TextInputProps & { label?: string; big?: boolean }>(
   function TypedInput({ label, big, style, ...rest }, ref) {
     const p = usePalette();
@@ -346,6 +360,7 @@ export const TypedInput = forwardRef<TextInputInstance, TextInputProps & { label
           selectionColor={p.leather}
           cursorColor={p.leather}
           autoCorrect={false}
+          accessibilityLabel={label}
           {...rest}
           style={[
             big ? styles.inputBig : styles.input,

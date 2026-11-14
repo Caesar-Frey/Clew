@@ -19,3 +19,26 @@ describe('app.json native permissions', () => {
     expect(typeof options('expo-speech-recognition').microphonePermission).toBe('string');
   });
 });
+
+describe('database backup exclusion (iOS)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { addExclusion } = require('../plugins/withDbExcludedFromBackup');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs');
+  const template: string = fs.readFileSync(`${__dirname}/fixtures/AppDelegate.swift`, 'utf8');
+
+  it('is registered in app.json', () => {
+    expect(plugins).toContain('./plugins/withDbExcludedFromBackup');
+  });
+
+  it('marks Documents/SQLite as excluded before the app starts, once', () => {
+    const once = addExclusion(template);
+    expect(once).toMatch(/isExcludedFromBackup = true/);
+    expect(once.indexOf('isExcludedFromBackup')).toBeLessThan(once.indexOf('return super.application('));
+    expect(addExclusion(once)).toBe(once);
+  });
+
+  it('fails the build loudly if the AppDelegate shape changes', () => {
+    expect(() => addExclusion('class AppDelegate {}')).toThrow(/didFinishLaunchingWithOptions/);
+  });
+});

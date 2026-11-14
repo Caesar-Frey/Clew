@@ -1,5 +1,7 @@
+import { Directory, File } from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
 
+import { restoreCatalog, type CatalogDump } from '../backup/archive';
 import { forgetKeys, newKey, readKey, storeNewKey } from '../security/keyVault';
 
 import { migrate } from './schema';
@@ -72,10 +74,70 @@ export async function openEncryptedDatabase(): Promise<Db> {
   return db;
 }
 
+const SIDECARS = ['-wal', '-shm', '-journal'];
+
+const dbDir = (sub?: string) => {
+  const base: string = SQLite.defaultDatabaseDirectory;
+  return sub ? `${base}/${sub}` : base;
+};
+const fileAt = (dir: string, name: string) => new File(dir.startsWith('file://') ? dir : `file://${dir}`, name);
+
+/** Deletes the database file and its WAL/SHM/journal companions, if present. */
+function deleteDbFiles(dir: string): void {
+  for (const suffix of ['', ...SIDECARS]) {
+    const f = fileAt(dir, DB_NAME + suffix);
+    if (f.exists) f.delete();
+  }
+}
+
 /** Permanently erases all data and the key. Used to recover from a lost key. */
 export async function eraseAllData(): Promise<void> {
   // If the file can't be removed, keep the key: a fresh key would only meet
   // the same unreadable file again.
-  await SQLite.deleteDatabaseAsync(DB_NAME);
+  await SQLite.deleteDatabaseAsync(DB_NAME).catch((e: unknown) => {
+    if (fileAt(dbDir(), DB_NAME).exists) throw e;
+  });
+  deleteDbFiles(dbDir());
   await forgetKeys();
+}
+
+const STAGING = 'restore-staging';
+
+/**
+ * Replaces a catalog this phone can't decrypt (e.g. after moving to a new
+ * phone) with a backup. The backup is first written to a fresh database in a
+ * staging folder under a new key; the old file is only removed once that has
+ * fully succeeded, so a failure at any point leaves the phone as it was.
+ */
+export async function replaceUnreadableWithBackup(dump: CatalogDump): Promise<void> {
+  const staging = dbDir(STAGING);
+  const stagingDir = new Directory(staging.startsWith('file://') ? staging : `file://${staging}`);
+  if (stagingDir.exists) stagingDir.delete();
+  stagingDir.create({ intermediates: true });
+
+  const key = await newKey();
+  try {
+    const raw = await SQLite.openDatabaseAsync(DB_NAME, undefined, staging);
+    try {
+      await raw.execAsync(`PRAGMA key = "x'${key}'";`);
+      const db = adapt(raw);
+      await migrate(db);
+      await restoreCatalog(db, dump);
+    } finally {
+      await raw.closeAsync().catch(() => {});
+    }
+  } catch (e) {
+    if (stagingDir.exists) stagingDir.delete();
+    throw e;
+  }
+
+  // Point of no return: the restored catalog is complete on disk.
+  await forgetKeys();
+  await storeNewKey(key);
+  deleteDbFiles(dbDir());
+  for (const suffix of ['', ...SIDECARS]) {
+    const f = fileAt(staging, DB_NAME + suffix);
+    if (f.exists) f.move(fileAt(dbDir(), DB_NAME + suffix));
+  }
+  if (stagingDir.exists) stagingDir.delete();
 }
