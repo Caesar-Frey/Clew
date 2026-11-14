@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { checkPassphrase, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
+import { checkPassphrase, passphraseStrength, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
 import { discardShared, pickArchive, shareAgain } from '@/backup/device';
 import { replaceSummary, shortDate, stampDate } from '@/lib/format';
 import { useData } from '@/state/data';
@@ -142,7 +142,7 @@ function BackupFlow() {
       <PassphraseField label="Passphrase" value={pass} onChange={setPass} show={show} onToggle={() => setShow((s) => !s)} />
       <PassphraseField label="Same again" value={again} onChange={setAgain} show={show} onSubmit={() => ready && seal()} />
       <T variant="small" color={pass && problem ? p.stamp : p.inkSoft}>
-        {pass && problem ? problem : 'Tip: a few unrelated words make a strong passphrase that is easy to remember.'}
+        {pass && problem ? problem : `${pass ? `Strength: ${passphraseStrength(pass)}. ` : ''}Tip: a few unrelated words make a strong passphrase that is easy to remember.`}
       </T>
       {error && (
         <T variant="typed" color={p.stamp} accessibilityLiveRegion="polite">
