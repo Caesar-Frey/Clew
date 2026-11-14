@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { openArchive, peekArchive } from '@/backup/archive';
 import { nativeAead, pickArchive, randomBytes } from '@/backup/device';
 import { DatabaseUnreadableError, eraseAllData, replaceUnreadableWithBackup } from '@/db/open';
 import { KeyLockedError, recoverKey } from '@/security/keyVault';
-import { LockedScreen } from '@/security/lock';
+import { canUseDeviceAuth, LockedScreen } from '@/security/lock';
 import { useDataStatus } from '@/state/data';
 import { KeyboardScreen, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
@@ -199,10 +199,18 @@ function SealedGate({ error, onRetry }: { error: KeyLockedError; onRetry: () => 
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [noDeviceAuth, setNoDeviceAuth] = useState(false);
+
+  useEffect(() => {
+    // Without a passcode the phone can't release the sealed key: say so and offer the passphrase.
+    canUseDeviceAuth()
+      .then((ok) => setNoDeviceAuth(!ok))
+      .catch(() => {});
+  }, []);
 
   if (!recovering) {
     return (
-      <LockedScreen checking={false} busy={false} onUnlock={onRetry}>
+      <LockedScreen checking={false} busy={false} onUnlock={onRetry} problem={noDeviceAuth ? 'no-device-auth' : null}>
         <LibraryButton label="Use recovery passphrase" tone="ghost" compact onPress={() => setRecovering(true)} />
       </LockedScreen>
     );

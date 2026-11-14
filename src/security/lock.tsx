@@ -2,7 +2,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AppState, Modal, Platform, StyleSheet, View } from 'react-native';
+import { AppState, Linking, Modal, Platform, StyleSheet, View } from 'react-native';
 
 import { KeyholeIcon } from '../ui/icons';
 import { LibraryButton, Room, T } from '../ui/components';
@@ -51,14 +51,27 @@ async function setNativePrivacy(on: boolean): Promise<void> {
   }
 }
 
-async function authenticate(prompt: string): Promise<boolean> {
+/** Errors that mean the phone has no way to prove it's you any more. */
+const NO_DEVICE_AUTH = new Set(['not_enrolled', 'passcode_not_set', 'not_available']);
+
+/** Why unlocking can't work right now, in plain words; null if it can. */
+export type AuthProblem = 'no-device-auth' | 'lockout' | null;
+
+async function authenticateDetailed(prompt: string): Promise<{ success: boolean; problem: AuthProblem }> {
   const result = await LocalAuthentication.authenticateAsync({
     promptMessage: prompt,
     cancelLabel: 'Cancel',
     // Falls back to the device passcode so nobody is locked out of their data.
     disableDeviceFallback: false,
   });
-  return result.success;
+  if (result.success) return { success: true, problem: null };
+  if (NO_DEVICE_AUTH.has(result.error)) return { success: false, problem: 'no-device-auth' };
+  if (result.error === 'lockout') return { success: false, problem: 'lockout' };
+  return { success: false, problem: null };
+}
+
+async function authenticate(prompt: string): Promise<boolean> {
+  return (await authenticateDetailed(prompt)).success;
 }
 
 interface LockContextValue {
@@ -97,16 +110,21 @@ export function LockGate({ children }: { children: ReactNode }) {
   const [everUnlocked, setEverUnlocked] = useState(Platform.OS === 'web');
   const [covered, setCovered] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<AuthProblem>(null);
   const backgroundedAt = useRef<number | null>(null);
   const enabledRef = useRef(false);
 
   const unlock = useCallback(async () => {
     setBusy(true);
     try {
-      if (await authenticate('Unlock Clew')) {
+      const result = await authenticateDetailed('Unlock Clew');
+      setProblem(result.problem);
+      if (result.success) {
         setGate('unlocked');
         setEverUnlocked(true);
       }
+    } catch {
+      setProblem(null);
     } finally {
       setBusy(false);
     }
@@ -131,8 +149,12 @@ export function LockGate({ children }: { children: ReactNode }) {
           setEverUnlocked(true);
         }
       })
-      // If the setting can't be read, fail closed only if it might be on.
-      .catch(() => setGate('locked'));
+      // If the setting can't be read, fail closed, and keep relocking working.
+      .catch(() => {
+        enabledRef.current = true;
+        setEnabledState(true);
+        setGate('locked');
+      });
   }, [unlock]);
 
   useEffect(() => {
@@ -216,7 +238,7 @@ export function LockGate({ children }: { children: ReactNode }) {
       {/* A Modal, so it also covers screens presented as native modals
           (like a half-written card). Back does nothing while locked. */}
       <Modal visible={locked} animationType="fade" presentationStyle="fullScreen" onRequestClose={() => {}}>
-        <LockedScreen checking={gate === 'checking'} busy={busy} onUnlock={unlock} />
+        <LockedScreen checking={gate === 'checking'} busy={busy} onUnlock={unlock} problem={problem} />
       </Modal>
       {!locked && covered && <PrivacyCover />}
     </LockContext.Provider>
@@ -227,14 +249,32 @@ export function LockedScreen({
   checking,
   busy,
   onUnlock,
+  problem = null,
   children,
 }: {
   checking: boolean;
   busy: boolean;
   onUnlock: () => void;
+  problem?: AuthProblem;
   children?: ReactNode;
 }) {
   const p = usePalette();
+  if (problem === 'no-device-auth') {
+    return (
+      <Room style={styles.center}>
+        <T variant="heading" style={{ textAlign: 'center' }} accessibilityRole="header">
+          This phone has no passcode now
+        </T>
+        <T variant="body" style={{ textAlign: 'center' }}>
+          Clew is locked with your Face ID, fingerprint or passcode, and this phone no longer has one set up. Turn a passcode back
+          on in Settings, then come back and unlock.
+        </T>
+        <LibraryButton label="Open Settings" tone="lamp" onPress={() => Linking.openSettings()} />
+        <LibraryButton label="Try again" tone="ghost" disabled={busy} onPress={onUnlock} />
+        {children}
+      </Room>
+    );
+  }
   return (
     <Room style={styles.center}>
       <View style={[styles.door, { backgroundColor: p.lamp, borderColor: p.brass }]}>
@@ -246,6 +286,11 @@ export function LockedScreen({
       <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
         Unlock to see where your things are.
       </T>
+      {problem === 'lockout' && (
+        <T variant="small" color={p.stamp} style={{ textAlign: 'center' }} accessibilityLiveRegion="polite">
+          Too many tries. Unlock the phone with its passcode, then try again.
+        </T>
+      )}
       {!checking && <LibraryButton label="Unlock" tone="lamp" disabled={busy} onPress={onUnlock} />}
       {children}
     </Room>
