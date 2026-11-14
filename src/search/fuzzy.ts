@@ -5,22 +5,8 @@
  */
 
 /** Letters that NFD doesn't take apart, folded to plain Latin. */
-const FOLD: Record<string, string> = {
-  ł: "l",
-  ø: "o",
-  đ: "d",
-  ð: "d",
-  ß: "ss",
-  æ: "ae",
-  œ: "oe",
-  þ: "th",
-  ı: "i",
-  ħ: "h",
-  ŧ: "t",
-  ĸ: "k",
-  ŋ: "n",
-};
-const FOLD_RE = new RegExp(`[${Object.keys(FOLD).join("")}]`, "g");
+const FOLD: Record<string, string> = { ł: 'l', ø: 'o', đ: 'd', ð: 'd', ß: 'ss', æ: 'ae', œ: 'oe', þ: 'th', ı: 'i', ħ: 'h', ŧ: 't', ĸ: 'k', ŋ: 'n' };
+const FOLD_RE = new RegExp(`[${Object.keys(FOLD).join('')}]`, 'g');
 
 /**
  * Lower case, accents off, special letters folded (ł→l, ß→ss), and anything
@@ -31,11 +17,11 @@ export function normalize(text: string): string {
   return text
     .toLowerCase()
     .replace(FOLD_RE, (c) => FOLD[c] ?? c)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
     .trim()
-    .normalize("NFC");
+    .normalize('NFC');
 }
 
 /** Tokens by text: a catalog re-index only tokenises text it hasn't seen. */
@@ -45,7 +31,7 @@ export function tokenize(text: string): string[] {
   const hit = tokenCache.get(text);
   if (hit) return hit;
   const n = normalize(text);
-  const tokens = n ? n.split(" ") : [];
+  const tokens = n ? n.split(' ') : [];
   if (tokenCache.size > 60_000) tokenCache.clear();
   tokenCache.set(text, tokens);
   return tokens;
@@ -74,18 +60,8 @@ export function editDistance(a: string, b: string, max: number): number {
     const ai = a.charCodeAt(i - 1);
     for (let j = 1; j < n; j++) {
       const bj = b.charCodeAt(j - 1);
-      let v = Math.min(
-        prev[j]! + 1,
-        cur[j - 1]! + 1,
-        prev[j - 1]! + (ai === bj ? 0 : 1),
-      );
-      if (
-        i > 1 &&
-        j > 1 &&
-        ai === b.charCodeAt(j - 2) &&
-        a.charCodeAt(i - 2) === bj
-      )
-        v = Math.min(v, prev2[j - 2]! + 1);
+      let v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (ai === bj ? 0 : 1));
+      if (i > 1 && j > 1 && ai === b.charCodeAt(j - 2) && a.charCodeAt(i - 2) === bj) v = Math.min(v, prev2[j - 2]! + 1);
       cur[j] = v;
       if (v < rowMin) rowMin = v;
     }
@@ -133,14 +109,10 @@ export function scoreToken(q: string, t: string): number {
     // Compare against the whole word and against a same-length prefix, so a
     // typo in a half-typed word still matches.
     if (q.length >= 4 && missingLetters(q, t, max) <= max) {
-      const d = Math.min(
-        editDistance(q, t, max),
-        editDistance(q, t.slice(0, q.length), max),
-      );
+      const d = Math.min(editDistance(q, t, max), editDistance(q, t.slice(0, q.length), max));
       if (d <= max) return 0.55 - 0.1 * d;
     }
-    if (q[0] === t[0] && isSubsequence(q, t) && q.length / t.length >= 0.5)
-      return 0.35;
+    if (q[0] === t[0] && isSubsequence(q, t) && q.length / t.length >= 0.5) return 0.35;
   }
   return 0;
 }
@@ -207,10 +179,7 @@ export function prepareFields(fields: SearchField[]): PreparedField[] {
     idOf = new Map();
     generation += 1;
   }
-  return fields.map((f) => ({
-    ids: tokenize(f.text).map(wordId),
-    weight: f.weight,
-  }));
+  return fields.map((f) => ({ ids: tokenize(f.text).map(wordId), weight: f.weight }));
 }
 
 export function createSearchIndex<T>(docs: SearchDoc<T>[]): SearchIndex<T> {
@@ -222,8 +191,7 @@ export function createSearchIndex<T>(docs: SearchDoc<T>[]): SearchIndex<T> {
   }));
   // A reset during preparation would mix id spaces; prepare again from text.
   if (generation !== gen) {
-    for (let i = 0; i < docs.length; i++)
-      prepared[i]!.fields = prepareFields(docs[i]!.fields ?? []);
+    for (let i = 0; i < docs.length; i++) prepared[i]!.fields = prepareFields(docs[i]!.fields ?? []);
   }
 
   function scoresFor(q: string): Float32Array {
@@ -255,17 +223,10 @@ export function createSearchIndex<T>(docs: SearchDoc<T>[]): SearchIndex<T> {
         }
         total += best;
       }
-      if (matchedAll)
-        results.push({
-          value: doc.value,
-          score: total / tables.length,
-          rank: doc.rank,
-        });
+      if (matchedAll) results.push({ value: doc.value, score: total / tables.length, rank: doc.rank });
     }
     results.sort((a, b) => b.score - a.score || b.rank - a.rank);
-    return results
-      .slice(0, limit)
-      .map(({ value, score }) => ({ value, score }));
+    return results.slice(0, limit).map(({ value, score }) => ({ value, score }));
   }
 
   return { search, size: prepared.length };

@@ -1,8 +1,8 @@
-import Database from "better-sqlite3";
+import Database from 'better-sqlite3';
 
-import { createRepo } from "../src/db/repo";
-import { migrate } from "../src/db/schema";
-import type { Db, SqlValue } from "../src/db/types";
+import { createRepo } from '../src/db/repo';
+import { migrate } from '../src/db/schema';
+import type { Db, SqlValue } from '../src/db/types';
 
 /** Lets other pending work run, the way a native call hands back to the JS thread. */
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -13,9 +13,8 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
  * transactions behave like expo-sqlite's (not exclusive; nesting throws).
  */
 export function memoryDb(): Db {
-  const raw = new Database(":memory:");
-  const bind = (params?: SqlValue[]) =>
-    (params ?? []).map((p) => (p instanceof Uint8Array ? Buffer.from(p) : p));
+  const raw = new Database(':memory:');
+  const bind = (params?: SqlValue[]) => (params ?? []).map((p) => (p instanceof Uint8Array ? Buffer.from(p) : p));
   return {
     async execAsync(sql) {
       await tick();
@@ -32,20 +31,17 @@ export function memoryDb(): Db {
     async getFirstAsync<T>(sql: string, params?: SqlValue[]) {
       await tick();
       const stmt = raw.prepare(sql);
-      return ((stmt.reader
-        ? stmt.get(...bind(params))
-        : (stmt.run(...bind(params)), undefined)) ?? null) as T | null;
+      return ((stmt.reader ? stmt.get(...bind(params)) : (stmt.run(...bind(params)), undefined)) ?? null) as T | null;
     },
     async withTransactionAsync(task) {
       await tick();
-      if (raw.inTransaction)
-        throw new Error("cannot start a transaction within a transaction");
-      raw.exec("BEGIN");
+      if (raw.inTransaction) throw new Error('cannot start a transaction within a transaction');
+      raw.exec('BEGIN');
       try {
         await task();
-        raw.exec("COMMIT");
+        raw.exec('COMMIT');
       } catch (e) {
-        raw.exec("ROLLBACK");
+        raw.exec('ROLLBACK');
         throw e;
       }
     },

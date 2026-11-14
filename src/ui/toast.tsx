@@ -1,29 +1,12 @@
-import * as Haptics from "expo-haptics";
-import { usePathname } from "expo-router";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  AccessibilityInfo,
-  Animated,
-  Easing,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from 'expo-haptics';
+import { usePathname } from 'expo-router';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAnimatedValue, useReducedMotion } from "./animated";
-import { fonts, usePalette } from "./theme";
-import { pushToast, runUndo, SHOW_MS, toastLift } from "./toastStack";
+import { useAnimatedValue, useReducedMotion } from './animated';
+import { fonts, usePalette } from './theme';
+import { pushToast, runUndo, SHOW_MS, toastLift } from './toastStack';
 
 interface ToastInput {
   message: string;
@@ -42,7 +25,7 @@ const LiftContext = createContext<((height: number) => void) | null>(null);
 
 export function useToast() {
   const show = useContext(ToastContext);
-  if (!show) throw new Error("useToast outside ToastProvider");
+  if (!show) throw new Error('useToast outside ToastProvider');
   return show;
 }
 
@@ -58,10 +41,7 @@ function useScreenReader(): boolean {
     AccessibilityInfo.isScreenReaderEnabled()
       .then((v) => live && setOn(v))
       .catch(() => {});
-    const sub = AccessibilityInfo.addEventListener(
-      "screenReaderChanged",
-      setOn,
-    );
+    const sub = AccessibilityInfo.addEventListener('screenReaderChanged', setOn);
     return () => {
       live = false;
       sub.remove();
@@ -87,34 +67,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     counter.current += 1;
     const key = counter.current;
     setToasts((list) => pushToast(list, { ...t, key }));
-    const extras = [t.undo && "Undo", t.action?.label]
-      .filter(Boolean)
-      .join(" and ");
-    AccessibilityInfo.announceForAccessibility(
-      extras ? `${t.message}. ${extras} available.` : t.message,
-    );
+    const extras = [t.undo && 'Undo', t.action?.label].filter(Boolean).join(' and ');
+    AccessibilityInfo.announceForAccessibility(extras ? `${t.message}. ${extras} available.` : t.message);
   }, []);
-  const remove = useCallback(
-    (key: number) => setToasts((list) => list.filter((x) => x.key !== key)),
-    [],
-  );
-  const reportHeight = useCallback(
-    (h: number) => setTabBarHeight((cur) => (Math.abs(cur - h) < 1 ? cur : h)),
-    [],
-  );
+  const remove = useCallback((key: number) => setToasts((list) => list.filter((x) => x.key !== key)), []);
+  const reportHeight = useCallback((h: number) => setTabBarHeight((cur) => (Math.abs(cur - h) < 1 ? cur : h)), []);
 
   return (
     <ToastContext.Provider value={show}>
       <LiftContext.Provider value={reportHeight}>
         {children}
         {toasts.length > 0 && (
-          <View
-            pointerEvents="box-none"
-            style={[
-              styles.wrap,
-              { bottom: toastLift(pathname, tabBarHeight, insets.bottom) },
-            ]}
-          >
+          <View pointerEvents="box-none" style={[styles.wrap, { bottom: toastLift(pathname, tabBarHeight, insets.bottom) }]}>
             {toasts.map((t, i) => (
               <Slip
                 key={t.key}
@@ -154,11 +118,7 @@ function Slip({
   const [busy, setBusy] = useState(false);
 
   const hide = useCallback(() => {
-    Animated.timing(v, {
-      toValue: 0,
-      duration: still ? 0 : 180,
-      useNativeDriver: true,
-    }).start(() => onGone(toast.key));
+    Animated.timing(v, { toValue: 0, duration: still ? 0 : 180, useNativeDriver: true }).start(() => onGone(toast.key));
   }, [v, still, onGone, toast.key]);
 
   useEffect(() => {
@@ -180,18 +140,8 @@ function Slip({
     () => ({
       opacity: v,
       transform: [
-        {
-          translateY: v.interpolate({
-            inputRange: [0, 1],
-            outputRange: [40, 0],
-          }),
-        },
-        {
-          rotate: v.interpolate({
-            inputRange: [0, 1],
-            outputRange: ["-2deg", behind % 2 ? "0.5deg" : "-0.6deg"],
-          }),
-        },
+        { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) },
+        { rotate: v.interpolate({ inputRange: [0, 1], outputRange: ['-2deg', behind % 2 ? '0.5deg' : '-0.6deg'] }) },
         { scale: 1 - Math.min(behind, 2) * 0.03 },
       ],
     }),
@@ -199,21 +149,8 @@ function Slip({
   );
 
   return (
-    <Animated.View
-      pointerEvents="box-none"
-      style={style}
-      accessibilityLiveRegion="polite"
-    >
-      <View
-        style={[
-          styles.slip,
-          {
-            backgroundColor: p.lampDeep,
-            borderColor: p.brassDark,
-            shadowColor: p.shadow,
-          },
-        ]}
-      >
+    <Animated.View pointerEvents="box-none" style={style} accessibilityLiveRegion="polite">
+      <View style={[styles.slip, { backgroundColor: p.lampDeep, borderColor: p.brassDark, shadowColor: p.shadow }]}>
         <View style={[styles.perf, { borderColor: p.brass }]} />
         <Text style={[styles.message, { color: p.onLamp }]} numberOfLines={2}>
           {toast.message}
@@ -235,24 +172,14 @@ function Slip({
             disabled={busy}
             onPress={async () => {
               setBusy(true);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-                () => {},
-              );
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               const ok = await runUndo(toast.undo ?? (() => {}));
               hide();
               if (!ok) onUndoFailed();
             }}
           />
         )}
-        {paused && (
-          <SlipButton
-            label="✕"
-            accessibilityLabel="Dismiss"
-            color={p.brassLight}
-            onPress={hide}
-            plain
-          />
-        )}
+        {paused && <SlipButton label="✕" accessibilityLabel="Dismiss" color={p.brassLight} onPress={hide} plain />}
       </View>
     </Animated.View>
   );
@@ -288,10 +215,10 @@ function SlipButton({
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: "absolute", left: 14, right: 14, gap: 8 },
+  wrap: { position: 'absolute', left: 14, right: 14, gap: 8 },
   slip: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
     paddingVertical: 12,
     paddingLeft: 22,
@@ -303,27 +230,9 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
   },
-  perf: {
-    position: "absolute",
-    left: 8,
-    top: 6,
-    bottom: 6,
-    borderLeftWidth: 1.5,
-    borderStyle: "dashed",
-  },
+  perf: { position: 'absolute', left: 8, top: 6, bottom: 6, borderLeftWidth: 1.5, borderStyle: 'dashed' },
   message: { flex: 1, fontFamily: fonts.typed, fontSize: 15, lineHeight: 20 },
-  button: {
-    borderWidth: 1.5,
-    borderRadius: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    transform: [{ rotate: "-3deg" }],
-  },
+  button: { borderWidth: 1.5, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 5, transform: [{ rotate: '-3deg' }] },
   plain: { paddingHorizontal: 6, paddingVertical: 5 },
-  buttonText: {
-    fontFamily: fonts.stamp,
-    fontSize: 15,
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-  },
+  buttonText: { fontFamily: fonts.stamp, fontSize: 15, letterSpacing: 1.5, textTransform: 'uppercase' },
 });

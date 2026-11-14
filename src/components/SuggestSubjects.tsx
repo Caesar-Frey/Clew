@@ -1,12 +1,12 @@
-import * as Haptics from "expo-haptics";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import * as Haptics from 'expo-haptics';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { useAssistant } from "@/ai/assistant";
-import { tagList, type TagDraft } from "@/ai/text";
-import { T } from "@/ui/components";
-import { SparkIcon } from "@/ui/icons";
-import { fonts, usePalette } from "@/ui/theme";
+import { useAssistant } from '@/ai/assistant';
+import { tagList, type TagDraft } from '@/ai/text';
+import { T } from '@/ui/components';
+import { SparkIcon } from '@/ui/icons';
+import { fonts, usePalette } from '@/ui/theme';
 
 /**
  * "Suggest tags": asks the on-device assistant for a name and tags,
@@ -39,7 +39,7 @@ export function SuggestSubjects({
   const [draft, setDraft] = useState<TagDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const ready = status.state === "ready";
+  const ready = status.state === 'ready';
 
   const ask = useCallback(async () => {
     setBusy(true);
@@ -47,8 +47,7 @@ export function SuggestSubjects({
     try {
       const d = await suggest({ name, notes, photo, existing: tagList(tags) });
       setDraft(d);
-      if (!d.tags.length && !d.name)
-        setError("No ideas this time. Try a clearer photo.");
+      if (!d.tags.length && !d.name) setError('No ideas this time. Try a clearer photo.');
     } catch {
       setError("The assistant couldn't look just now.");
     } finally {
@@ -70,48 +69,28 @@ export function SuggestSubjects({
   const canAsk = !busy && (!!name.trim() || !!photo);
   const have = new Set(tagList(tags).map((t) => t.toLowerCase()));
   const open = draft?.tags.filter((t) => !have.has(t)) ?? [];
-  const offerName =
-    onName &&
-    draft?.name &&
-    draft.name.toLowerCase() !== name.trim().toLowerCase()
-      ? draft.name
-      : null;
+  const offerName = onName && draft?.name && draft.name.toLowerCase() !== name.trim().toLowerCase() ? draft.name : null;
 
   return (
     <View style={{ gap: 10 }}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Suggest tags"
-        accessibilityHint={
-          photo
-            ? "The assistant looks at the photo on this phone"
-            : "The assistant reads the name on this phone"
-        }
+        accessibilityHint={photo ? 'The assistant looks at the photo on this phone' : 'The assistant reads the name on this phone'}
         accessibilityState={{ disabled: !canAsk, busy }}
         disabled={!canAsk}
         onPress={ask}
         hitSlop={8}
         style={[styles.ask, { opacity: canAsk || busy ? 1 : 0.45 }]}
       >
-        {busy ? (
-          <ActivityIndicator size="small" color={p.leatherText} />
-        ) : (
-          <SparkIcon size={16} color={p.leatherText} />
-        )}
+        {busy ? <ActivityIndicator size="small" color={p.leatherText} /> : <SparkIcon size={16} color={p.leatherText} />}
         <T variant="small" color={p.leatherText}>
-          {busy
-            ? "The assistant is looking…"
-            : draft
-              ? "Suggest again"
-              : "Suggest tags"}
+          {busy ? 'The assistant is looking…' : draft ? 'Suggest again' : 'Suggest tags'}
         </T>
       </Pressable>
 
       {(offerName || open.length > 0) && (
-        <View
-          style={styles.slips}
-          accessibilityLabel="Suggestions. Tap one to keep it."
-        >
+        <View style={styles.slips} accessibilityLabel="Suggestions. Tap one to keep it.">
           {offerName && (
             <Slip
               label={`Call it “${offerName}”`}
@@ -123,12 +102,7 @@ export function SuggestSubjects({
             />
           )}
           {open.map((t) => (
-            <Slip
-              key={t}
-              label={`+ ${t}`}
-              a11y={`Add tag ${t}`}
-              onPress={() => onTag(t)}
-            />
+            <Slip key={t} label={`+ ${t}`} a11y={`Add tag ${t}`} onPress={() => onTag(t)} />
           ))}
         </View>
       )}
@@ -141,15 +115,7 @@ export function SuggestSubjects({
   );
 }
 
-function Slip({
-  label,
-  a11y,
-  onPress,
-}: {
-  label: string;
-  a11y: string;
-  onPress: () => void;
-}) {
+function Slip({ label, a11y, onPress }: { label: string; a11y: string; onPress: () => void }) {
   const p = usePalette();
   return (
     <Pressable
@@ -161,11 +127,7 @@ function Slip({
       }}
       style={({ pressed }) => [
         styles.slip,
-        {
-          borderColor: p.leatherText,
-          backgroundColor: pressed ? p.rule : "transparent",
-          transform: [{ rotate: pressed ? "0deg" : "-1deg" }],
-        },
+        { borderColor: p.leatherText, backgroundColor: pressed ? p.rule : 'transparent', transform: [{ rotate: pressed ? '0deg' : '-1deg' }] },
       ]}
     >
       <T style={[styles.slipText, { color: p.leatherText }]}>{label}</T>
@@ -174,19 +136,8 @@ function Slip({
 }
 
 const styles = StyleSheet.create({
-  ask: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-  },
-  slips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  slip: {
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderRadius: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
+  ask: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' },
+  slips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  slip: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 3, paddingHorizontal: 10, paddingVertical: 5 },
   slipText: { fontFamily: fonts.typed, fontSize: 14 },
 });

@@ -1,20 +1,14 @@
-import type { PlannedReminder } from "../src/reminders/plan";
-import type { ReminderPermission } from "../src/reminders/scheduler";
-import { createReminderSyncer } from "../src/reminders/syncer";
+import type { PlannedReminder } from '../src/reminders/plan';
+import type { ReminderPermission } from '../src/reminders/scheduler';
+import { createReminderSyncer } from '../src/reminders/syncer';
 
-const reminder = (id: string): PlannedReminder => ({
-  id,
-  at: 1,
-  title: "t",
-  body: "b",
-  itemId: "i",
-});
+const reminder = (id: string): PlannedReminder => ({ id, at: 1, title: 't', body: 'b', itemId: 'i' });
 
 function setup(initial: ReminderPermission) {
   const state = {
     permission: initial,
     asked: false,
-    plan: [reminder("due:1")],
+    plan: [reminder('due:1')],
     scheduled: [] as PlannedReminder[][],
     asks: 0,
     failNext: false,
@@ -25,7 +19,7 @@ function setup(initial: ReminderPermission) {
     permission: async () => state.permission,
     ask: async () => {
       state.asks++;
-      state.permission = "granted";
+      state.permission = 'granted';
       return true;
     },
     asked: () => state.asked,
@@ -37,7 +31,7 @@ function setup(initial: ReminderPermission) {
     schedule: async (plan) => {
       if (state.failNext) {
         state.failNext = false;
-        throw new Error("partial");
+        throw new Error('partial');
       }
       state.scheduled.push(plan);
     },
@@ -45,24 +39,24 @@ function setup(initial: ReminderPermission) {
   return { state, syncer };
 }
 
-describe("reminder syncing", () => {
+describe('reminder syncing', () => {
   it('schedules on the very first grant, even though saving "asked" re-renders mid-way', async () => {
-    const { state, syncer } = setup("undetermined");
+    const { state, syncer } = setup('undetermined');
     await syncer.run();
     expect(state.asks).toBe(1);
-    expect(state.scheduled).toEqual([[reminder("due:1")]]);
+    expect(state.scheduled).toEqual([[reminder('due:1')]]);
   });
 
-  it("asks only once on its own, and only marks it asked after the prompt", async () => {
-    const { state, syncer } = setup("undetermined");
+  it('asks only once on its own, and only marks it asked after the prompt', async () => {
+    const { state, syncer } = setup('undetermined');
     state.asked = true;
     await syncer.run();
     expect(state.asks).toBe(0);
     expect(state.scheduled).toEqual([]);
   });
 
-  it("retries after a failed schedule and on a forced (foreground) run", async () => {
-    const { state, syncer } = setup("granted");
+  it('retries after a failed schedule and on a forced (foreground) run', async () => {
+    const { state, syncer } = setup('granted');
     state.failNext = true;
     await syncer.run();
     expect(state.scheduled).toEqual([]);
@@ -74,8 +68,8 @@ describe("reminder syncing", () => {
     expect(state.scheduled).toHaveLength(2);
   });
 
-  it("clears reminders when there is nothing to remind about, even without permission", async () => {
-    const { state, syncer } = setup("denied");
+  it('clears reminders when there is nothing to remind about, even without permission', async () => {
+    const { state, syncer } = setup('denied');
     state.plan = [];
     await syncer.run();
     expect(state.scheduled).toEqual([[]]);

@@ -1,16 +1,9 @@
-import type { Item, Loan } from "../db/types";
+import type { Item, Loan } from '../db/types';
 
-const sameList = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((x, i) => x === b[i]);
+const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 const sameLoan = (a: Loan | null, b: Loan | null) =>
-  a === b ||
-  (!!a &&
-    !!b &&
-    a.id === b.id &&
-    a.person === b.person &&
-    a.dueAt === b.dueAt &&
-    a.lentAt === b.lentAt);
+  a === b || (!!a && !!b && a.id === b.id && a.person === b.person && a.dueAt === b.dueAt && a.lentAt === b.lentAt);
 
 export function sameItem(a: Item, b: Item): boolean {
   return (
