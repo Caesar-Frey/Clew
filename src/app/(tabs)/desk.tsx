@@ -10,6 +10,7 @@ import { AssistantCard } from '@/components/AssistantCard';
 import { REMINDERS_OFF_KEY } from '@/components/ReminderSync';
 import { olderThan, relativeDays, shortDate } from '@/lib/format';
 import { askForReminders, reminderPermission, type ReminderPermission } from '@/reminders/scheduler';
+import { BACKUP_STALE_MS } from '@/lib/backupNudge';
 import { LAST_BACKUP_KEY, useData } from '@/state/data';
 import { IndexCard, LibraryButton, Room, SectionLabel, T } from '@/ui/components';
 import { ArchiveBoxIcon, BellIcon, KeyholeIcon } from '@/ui/icons';
@@ -86,7 +87,7 @@ export default function DeskScreen() {
 
   const lent = items.filter((i) => i.activeLoan).length;
   const lastBackup = settings[LAST_BACKUP_KEY] ? Number(settings[LAST_BACKUP_KEY]) : null;
-  const backupStale = items.length > 0 && olderThan(lastBackup, BACKUP_NUDGE_MS);
+  const backupStale = items.length > 0 && olderThan(lastBackup, BACKUP_STALE_MS);
 
   return (
     <Room>
@@ -265,8 +266,6 @@ export default function DeskScreen() {
   );
 }
 
-/** Suggest a fresh backup after this long. */
-const BACKUP_NUDGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function Rule({ text }: { text: string }) {
   const p = usePalette();

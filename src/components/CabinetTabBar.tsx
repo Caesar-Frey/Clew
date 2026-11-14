@@ -9,6 +9,9 @@ import { CatalogIcon, CheckedOutIcon, DeskIcon, NewCardIcon, ShelvesIcon, type I
 import { fonts, usePalette } from '@/ui/theme';
 import { useReportTabBarHeight } from '@/ui/toast';
 
+/** Pass as `tabBarBadge` for a plain dot instead of a number (backup due). */
+export const BACKUP_DOT = '•';
+
 const TABS: Record<string, { label: string; Icon: ComponentType<IconProps> }> = {
   index: { label: 'Catalog', Icon: CatalogIcon },
   shelves: { label: 'Shelves', Icon: ShelvesIcon },
@@ -91,7 +94,7 @@ function Drawer({
     <Pressable
       accessibilityRole="tab"
       accessibilityState={{ selected: focused }}
-      accessibilityLabel={badge ? `${label}, ${badge}` : label}
+      accessibilityLabel={badge === BACKUP_DOT ? `${label}, backup due` : badge ? `${label}, ${badge}` : label}
       onPress={onPress}
       style={styles.slot}
     >
@@ -116,7 +119,9 @@ function Drawer({
         </View>
         <Icon size={20} color={focused ? p.brassLight : p.brass} accent={focused ? 'rgba(226,197,142,0.25)' : undefined} />
         <View style={[styles.pull, { backgroundColor: p.brass }]} />
-        {badge ? (
+        {badge === BACKUP_DOT ? (
+          <View style={[styles.dot, { backgroundColor: p.stamp }]} />
+        ) : badge ? (
           <View style={[styles.badge, { backgroundColor: p.stamp }]}>
             <Text maxFontSizeMultiplier={1.4} style={styles.badgeText}>
               {badge}
@@ -188,6 +193,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeText: { color: '#FFF4E6', fontFamily: fonts.typedBold, fontSize: 10 },
+  dot: { position: 'absolute', top: -5, right: -2, width: 10, height: 10, borderRadius: 5 },
   newCard: {
     width: 60,
     height: 60,

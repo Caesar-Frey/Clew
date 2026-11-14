@@ -7,9 +7,10 @@ import { useMeaningSearch } from '@/ai/assistant';
 import { ItemCard } from '@/components/ItemCard';
 import { VoiceButton } from '@/components/VoiceButton';
 import type { Item, Location } from '@/db/types';
+import { BACKUP_NUDGE_DISMISSED_KEY, showFirstBackupCard } from '@/lib/backupNudge';
 import { buildCatalog } from '@/search/catalog';
-import { useData } from '@/state/data';
-import { LibraryButton, Room, SectionLabel, SpineChip, Stamp, T } from '@/ui/components';
+import { LAST_BACKUP_KEY, useData } from '@/state/data';
+import { IndexCard, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T } from '@/ui/components';
 import { ChevronIcon, CloseIcon, LoupeIcon } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
 import { spokenQuery } from '@/voice/parse';
@@ -18,7 +19,12 @@ import { useDictation } from '@/voice/useDictation';
 export default function CatalogScreen() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const { items, locations, index, boxes } = useData();
+  const { items, locations, index, boxes, settings, actions } = useData();
+  const firstBackup = showFirstBackupCard({
+    things: items.length,
+    lastBackupAt: settings[LAST_BACKUP_KEY] ? Number(settings[LAST_BACKUP_KEY]) : null,
+    dismissed: settings[BACKUP_NUDGE_DISMISSED_KEY] === '1',
+  });
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);
   const input = useRef<TextInputInstance>(null);
@@ -106,6 +112,24 @@ export default function CatalogScreen() {
                 />
               )}
             </View>
+            {firstBackup && !searching && (
+              <IndexCard punched={false} ruled={false} style={{ paddingBottom: 14 }}>
+                <View style={{ gap: 10 }}>
+                  <T variant="heading">Make a backup</T>
+                  <T variant="body">If this phone is lost, so is your catalog. A backup is one encrypted file you keep somewhere else.</T>
+                  <View style={styles.nudgeRow}>
+                    <LibraryButton style={{ flex: 1 }} compact tone="lamp" label="Make a backup" onPress={() => router.push('/archive')} />
+                    <LibraryButton
+                      style={{ flex: 1 }}
+                      compact
+                      tone="ghost"
+                      label="Not now"
+                      onPress={() => actions.setSetting(BACKUP_NUDGE_DISMISSED_KEY, '1').catch(() => {})}
+                    />
+                  </View>
+                </View>
+              </IndexCard>
+            )}
             {places.length > 0 && (
               <View style={{ gap: 6 }}>
                 <SectionLabel>Places</SectionLabel>
@@ -189,10 +213,12 @@ function EmptyLibrary() {
       <T variant="heading" style={{ textAlign: 'center' }}>
         Your shelves are bare
       </T>
-      <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
-        Write a card for something you tend to misplace: the spare keys, the passport, the drill you lent out.
-      </T>
-      <LibraryButton label="Write the first card" onPress={() => router.push('/add')} />
+      <View style={styles.howTo}>
+        <HowTo n={1} title="Add a thing and where you put it" detail="“Passport, desk drawer.” Type it or say it." />
+        <HowTo n={2} title="Find it in a second" detail="Search a few letters, even misspelt." />
+        <HowTo n={3} title="Lent it? Clew remembers who has it" detail="And reminds you when it is due back." />
+      </View>
+      <LibraryButton label="Add your first thing" onPress={() => router.push('/add')} />
       <LibraryButton
         label="Restore a backup"
         tone="ghost"
@@ -202,7 +228,23 @@ function EmptyLibrary() {
   );
 }
 
+function HowTo({ n, title, detail }: { n: number; title: string; detail: string }) {
+  const p = usePalette();
+  return (
+    <View style={{ gap: 2 }}>
+      <T variant="typed" color={p.ink}>
+        {n} · {title}
+      </T>
+      <T variant="small" color={p.inkSoft}>
+        {detail}
+      </T>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  howTo: { alignSelf: 'stretch', gap: 12, paddingVertical: 4 },
+  nudgeRow: { flexDirection: 'row', gap: 10 },
   search: {
     flexDirection: 'row',
     alignItems: 'center',
