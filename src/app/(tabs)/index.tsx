@@ -108,7 +108,7 @@ export default function CatalogScreen() {
             </View>
             {places.length > 0 && (
               <View style={{ gap: 6 }}>
-                <SectionLabel>Shelves</SectionLabel>
+                <SectionLabel>Places</SectionLabel>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 6 }}>
                   {places.map((pl) => (
                     <SpineChip

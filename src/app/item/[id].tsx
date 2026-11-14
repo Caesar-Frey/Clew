@@ -384,8 +384,8 @@ function describe(h: HistoryEvent): string {
     case 'returned':
       return `Returned by ${h.person}`;
     case 'moved':
-      if (!h.fromPath) return `Shelved at ${h.toPath ?? 'nowhere'}`;
-      return `Moved from ${h.fromPath.split(' › ').pop()} to ${h.toPath ?? 'no shelf'}`;
+      if (!h.fromPath) return `Put in ${h.toPath ?? 'no place'}`;
+      return `Moved from ${h.fromPath.split(' › ').pop()} to ${h.toPath ?? 'no place'}`;
   }
 }
 

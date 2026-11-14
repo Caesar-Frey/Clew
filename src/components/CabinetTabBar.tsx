@@ -12,7 +12,7 @@ import { useReportTabBarHeight } from '@/ui/toast';
 const TABS: Record<string, { label: string; Icon: ComponentType<IconProps> }> = {
   index: { label: 'Catalog', Icon: CatalogIcon },
   shelves: { label: 'Shelves', Icon: ShelvesIcon },
-  lent: { label: 'Lent', Icon: CheckedOutIcon },
+  lent: { label: 'Lent out', Icon: CheckedOutIcon },
   desk: { label: 'Desk', Icon: DeskIcon },
 };
 

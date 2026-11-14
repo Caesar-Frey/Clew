@@ -37,7 +37,7 @@ export default function SealScreen() {
       leave();
     } catch (e) {
       if (e instanceof SealIncompleteError) {
-        Alert.alert('Sealed', e.message);
+        Alert.alert('Face ID is now required', e.message);
         leave();
         return;
       }
@@ -54,7 +54,7 @@ export default function SealScreen() {
           <IndexCard punched ruled={false}>
             <View style={{ gap: 12 }}>
               <T variant="label" color={p.headRule}>
-                Seal the catalog
+                Require Face ID to open data
               </T>
               <T variant="body">
                 The key that decrypts your catalog will only be released by your face or fingerprint. Even someone who can copy the
@@ -86,7 +86,7 @@ export default function SealScreen() {
               {error}
             </T>
           )}
-          <LibraryButton label={busy ? 'Sealing…' : 'Seal with Face ID or fingerprint'} tone="lamp" disabled={busy} onPress={seal} />
+          <LibraryButton label={busy ? 'Turning on…' : 'Require Face ID or fingerprint'} tone="lamp" disabled={busy} onPress={seal} />
         </ScrollView>
       </KeyboardScreen>
     </Room>

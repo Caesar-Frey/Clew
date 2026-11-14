@@ -64,7 +64,7 @@ export default function DeskScreen() {
     try {
       await lock.unseal();
     } catch (e) {
-      Alert.alert("Couldn't unseal", e instanceof Error ? e.message : String(e));
+      Alert.alert("Couldn't turn off the Face ID requirement", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -124,11 +124,11 @@ export default function DeskScreen() {
           {lock.enabled && (canSeal || lock.sealed) && (
             <View style={[styles.row, styles.subRow, { borderTopColor: p.rule }]}>
               <View style={{ flex: 1, gap: 2 }}>
-                <T variant="body">Seal with Face ID or fingerprint</T>
+                <T variant="body">Require Face ID to open data</T>
                 <T variant="small">
                   {lock.sealed
                     ? 'The catalog key is released only by your face or fingerprint. A recovery passphrase is kept as a spare.'
-                    : 'Stronger: the key that decrypts your catalog needs your face or fingerprint.'}
+                    : 'Stronger than the app lock: your data can only be decrypted after Face ID or a fingerprint.'}
                 </T>
               </View>
               <Switch
@@ -138,7 +138,7 @@ export default function DeskScreen() {
                 trackColor={{ true: p.lamp, false: p.cardEdge }}
                 thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
                 ios_backgroundColor={p.cardEdge}
-                accessibilityLabel="Seal with Face ID or fingerprint"
+                accessibilityLabel="Require Face ID to open data"
               />
             </View>
           )}
@@ -223,7 +223,7 @@ export default function DeskScreen() {
           </View>
         </IndexCard>
 
-        <SectionLabel>Holdings</SectionLabel>
+        <SectionLabel>Your catalog in numbers</SectionLabel>
         <View style={styles.stats}>
           <Stat label="Cards" value={items.length} />
           <Stat label="Places" value={locations.length} />

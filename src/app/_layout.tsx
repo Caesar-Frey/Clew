@@ -79,13 +79,13 @@ export default function RootLayout() {
                 <Stack.Screen name="item/[id]" options={{ title: '' }} />
                 <Stack.Screen name="place/[id]" options={{ title: '' }} />
                 <Stack.Screen name="browse" options={{ title: 'All things' }} />
-                <Stack.Screen name="move/[id]" options={{ presentation: 'modal', title: 'Re-shelve' }} />
+                <Stack.Screen name="move/[id]" options={{ presentation: 'modal', title: 'Move' }} />
                 <Stack.Screen name="move-place/[id]" options={{ presentation: 'modal', title: 'Move this place' }} />
-                <Stack.Screen name="lend/[id]" options={{ presentation: 'modal', title: 'Check out' }} />
+                <Stack.Screen name="lend/[id]" options={{ presentation: 'modal', title: 'Lend' }} />
                 <Stack.Screen name="archive" options={{ presentation: 'modal', title: 'Backup' }} />
                 <Stack.Screen name="photo/[id]" options={{ presentation: 'modal', title: 'Photo' }} />
                 <Stack.Screen name="identify" options={{ presentation: 'modal', title: 'Which box is this?' }} />
-                <Stack.Screen name="seal" options={{ presentation: 'modal', title: 'Seal the catalog' }} />
+                <Stack.Screen name="seal" options={{ presentation: 'modal', title: 'Face ID lock' }} />
               </Stack>
               </ToastProvider>
               </AssistantProvider>

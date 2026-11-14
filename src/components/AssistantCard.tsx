@@ -19,7 +19,7 @@ export function AssistantCard() {
   const ask = Platform.OS === 'web' ? (_t: string, _m: string, buttons: { onPress?: () => void }[]) => buttons[1]?.onPress?.() : Alert.alert;
 
   const confirmRemove = () =>
-    ask('Remove the assistant?', 'The model files are deleted from this phone. Your cards and subjects stay as they are.', [
+    ask('Remove the assistant?', 'The model files are deleted from this phone. Your things and tags stay as they are.', [
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => remove() },
     ]);
@@ -77,7 +77,7 @@ export function AssistantCard() {
       body = (
         <View style={{ gap: 10 }}>
           <T variant="small">
-            {status.model.title} is on this phone ({formatSize(totalBytes(status.model))}). Look for “Suggest subjects” on new cards, and
+            {status.model.title} is on this phone ({formatSize(totalBytes(status.model))}). Look for “Suggest tags” on new cards, and
             “Might be what you mean” in search.
           </T>
           <LibraryButton compact tone="ghost" label="Remove assistant" onPress={confirmRemove} />
@@ -122,7 +122,7 @@ export function AssistantCard() {
           <View style={{ flex: 1, gap: 2 }}>
             <T variant="heading">Library assistant</T>
             <T variant="small">
-              Optional. An open model that runs on this phone suggests names and subjects from a photo, and finds things by description.
+              Optional. An open model that runs on this phone suggests names and tags from a photo, and finds things by description.
             </T>
           </View>
         </View>

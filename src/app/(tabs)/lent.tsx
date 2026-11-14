@@ -98,8 +98,8 @@ export default function LentScreen() {
                   <LibraryButton
                     compact
                     tone="lamp"
-                    label="Back"
-                    accessibilityLabel={`${item.name} is back`}
+                    label="Returned"
+                    accessibilityLabel={`Mark ${item.name} returned`}
                     onPress={async () => {
                       try {
                         const loanId = await actions.returnItem(item.id);
