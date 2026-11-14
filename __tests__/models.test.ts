@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 
-import { EMBED_MODEL, formatSize, MODEL_LICENCES, modelFiles, totalBytes, VISION_MODELS } from '../src/ai/models';
+import { EMBED_MODEL, formatSize, MODEL_LICENCES, modelFiles, modelsForMemory, totalBytes, VISION_MODELS } from '../src/ai/models';
 import { sha256Stream } from '../src/ai/sha256';
 
 describe('downloadable models', () => {
@@ -42,5 +42,16 @@ describe('downloadable models', () => {
     expect(hex).toBe(bytesToHex(sha256(data)));
     expect(seen.at(-1)).toBe(data.length);
     expect(seen.length).toBe(3);
+  });
+});
+
+describe('models for this phone', () => {
+  const GB = 1024 ** 3;
+  it('hides the larger tier under 6 GB and keeps it on a 6 GB phone that reports a little less', () => {
+    const ids = (mem: number | null) => modelsForMemory(VISION_MODELS, mem).map((m) => m.minRamBytes);
+    expect(ids(4 * GB)).toEqual(VISION_MODELS.filter((m) => m.minRamBytes <= 3 * GB).map((m) => m.minRamBytes));
+    expect(ids(5.5 * GB)).toHaveLength(VISION_MODELS.length);
+    expect(ids(null)).toHaveLength(VISION_MODELS.length);
+    expect(ids(2 * GB)).toHaveLength(0);
   });
 });

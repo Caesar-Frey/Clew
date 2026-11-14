@@ -100,3 +100,13 @@ export function totalBytes(m: VisionModel): number {
 export function formatSize(bytes: number): string {
   return bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : `${Math.round(bytes / 1000 ** 2)} MB`;
 }
+
+/**
+ * Models this phone has the memory for. Phones report a little less than
+ * their nominal RAM (a "6 GB" phone says about 5.5 GB), hence the slack.
+ * Unknown memory (null) offers every model.
+ */
+export function modelsForMemory(models: readonly VisionModel[], totalMemory: number | null): VisionModel[] {
+  if (!totalMemory) return [...models];
+  return models.filter((m) => totalMemory >= m.minRamBytes * 0.85);
+}
