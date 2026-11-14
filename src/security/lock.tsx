@@ -7,7 +7,7 @@ import { AppState, Modal, Platform, StyleSheet, View } from 'react-native';
 import { KeyholeIcon } from '../ui/icons';
 import { LibraryButton, Room, T } from '../ui/components';
 import { usePalette } from '../ui/theme';
-import { getKeyMode, sealKey, unsealKey } from './keyVault';
+import { getKeyMode, SealIncompleteError, sealKey, unsealKey } from './keyVault';
 
 // Kept in the Keychain/Keystore (not the database) so it can be read before
 // anything is shown, and can't be flipped by editing app files.
@@ -179,11 +179,19 @@ export function LockGate({ children }: { children: ReactNode }) {
   );
 
   const seal = useCallback(async (recoveryPassphrase: string) => {
-    await sealKey(recoveryPassphrase);
+    let incomplete: unknown = null;
+    try {
+      await sealKey(recoveryPassphrase);
+    } catch (e) {
+      // Sealed, with cleanup still to do: the app is in sealed mode either way.
+      if (!(e instanceof SealIncompleteError)) throw e;
+      incomplete = e;
+    }
     await SecureStore.setItemAsync(LOCK_KEY, '1', STORE_OPTS);
     enabledRef.current = true;
     setEnabledState(true);
     setSealed(true);
+    if (incomplete) throw incomplete;
   }, []);
 
   const unseal = useCallback(async () => {
