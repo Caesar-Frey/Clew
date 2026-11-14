@@ -173,6 +173,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
       const clash = await findSibling(loc.parent_id, clean, id);
       if (clash) throw new Error(`There's already a place called "${clean}" here`);
       await db.runAsync('UPDATE locations SET name = ? WHERE id = ?', [clean, id]);
+      await markPlaceEmbeddingsStale(id);
     });
   }
 
@@ -187,6 +188,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
       const clash = await findSibling(parentId, loc.name, id);
       if (clash) throw new Error(`There's already a place called "${loc.name}" there`);
       await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [parentId, id]);
+      await markPlaceEmbeddingsStale(id);
     });
   }
 
@@ -202,6 +204,8 @@ export function createRepo(db: Db, deps: RepoDeps) {
     const fromPath = pathBefore(id);
     const toPath = loc.parent_id ? pathBefore(loc.parent_id) : null;
     await db.withTransactionAsync(async () => {
+      // Everything nested moves up a level, so its paths change.
+      await markPlaceEmbeddingsStale(id);
       const items = await db.getAllAsync<{ id: string }>('SELECT id FROM items WHERE location_id = ?', [id]);
       const t = now();
       for (const item of items) {
@@ -242,6 +246,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
    */
   async function mergeInto(sourceId: string, targetId: string, pathOf: (id: string) => string | null): Promise<void> {
     const t = now();
+    await markPlaceEmbeddingsStale(sourceId);
     const items = await db.getAllAsync<{ id: string }>('SELECT id FROM items WHERE location_id = ?', [sourceId]);
     for (const item of items) {
       await db.runAsync(
@@ -342,11 +347,29 @@ export function createRepo(db: Db, deps: RepoDeps) {
     return rows.map((r) => r.id);
   }
 
-  async function setEmbedding(itemId: string, embedding: Uint8Array, model: string): Promise<void> {
-    // Stamped with the item's own updated_at so a later edit marks it stale.
+  /**
+   * Stores an embedding, stamped with the `updated_at` the text was read at
+   * (`embeddedAt`), so an edit made while the model was working still marks
+   * it stale.
+   */
+  async function setEmbedding(itemId: string, embedding: Uint8Array, model: string, embeddedAt: number): Promise<void> {
+    await db.runAsync('UPDATE items SET embedding = ?, embedding_model = ?, embedding_updated_at = ? WHERE id = ?', [
+      embedding,
+      model,
+      embeddedAt,
+      itemId,
+    ]);
+  }
+
+  /**
+   * An item's embedded text includes its place path, so renaming or moving a
+   * place makes the embeddings of everything inside it (at any depth) stale.
+   */
+  async function markPlaceEmbeddingsStale(locationId: string): Promise<void> {
     await db.runAsync(
-      'UPDATE items SET embedding = ?, embedding_model = ?, embedding_updated_at = updated_at WHERE id = ?',
-      [embedding, model, itemId],
+      `WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT l.id FROM locations l JOIN sub ON l.parent_id = sub.id)
+       UPDATE items SET embedding_updated_at = 0 WHERE embedding IS NOT NULL AND location_id IN (SELECT id FROM sub)`,
+      [locationId],
     );
   }
 

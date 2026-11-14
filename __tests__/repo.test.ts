@@ -346,13 +346,47 @@ describe('assistant data', () => {
     const { repo } = await testRepo();
     const id = await repo.addItem({ name: 'Drill' });
     expect(await repo.staleEmbeddings('m')).toEqual([id]);
-    await repo.setEmbedding(id, new Uint8Array(8), 'm');
+    await repo.setEmbedding(id, new Uint8Array(8), 'm', (await repo.listItems())[0]!.updatedAt);
     expect(await repo.staleEmbeddings('m')).toEqual([]);
     expect(await repo.listEmbeddings('m')).toHaveLength(1);
     expect(await repo.staleEmbeddings('other')).toEqual([id]);
     await repo.updateItem(id, { notes: 'Bosch' });
     expect(await repo.staleEmbeddings('m')).toEqual([id]);
     expect(await repo.listEmbeddings('m')).toHaveLength(0);
+  });
+
+  it('keeps an embedding stale if the item changed while it was being made', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Drill' });
+    const readAt = (await repo.listItems())[0]!.updatedAt;
+    await repo.updateItem(id, { notes: 'edited mid-embedding' });
+    await repo.setEmbedding(id, new Uint8Array(8), 'm', readAt);
+    expect(await repo.staleEmbeddings('m')).toEqual([id]);
+  });
+
+  it('marks everything inside a renamed, moved, merged or deleted place stale', async () => {
+    const { repo } = await testRepo();
+    const embedAll = async () => {
+      for (const it of await repo.listItems()) await repo.setEmbedding(it.id, new Uint8Array(4), 'm', it.updatedAt);
+      expect(await repo.staleEmbeddings('m')).toEqual([]);
+    };
+    const shed = await repo.ensureLocationPath(['Shed']);
+    const box = await repo.ensureLocationPath(['Shed', 'Blue box']);
+    const attic = await repo.ensureLocationPath(['Attic']);
+    const drill = await repo.addItem({ name: 'Drill', locationId: box });
+    const tent = await repo.addItem({ name: 'Tent', locationId: attic });
+
+    await embedAll();
+    await repo.renameLocation(shed, 'Garage');
+    expect(await repo.staleEmbeddings('m')).toEqual([drill]);
+
+    await embedAll();
+    await repo.setLocationParent(box, attic);
+    expect(await repo.staleEmbeddings('m')).toEqual([drill]);
+
+    await embedAll();
+    await repo.deleteLocation(attic);
+    expect((await repo.staleEmbeddings('m')).sort()).toEqual([drill, tent].sort());
   });
 });
 
@@ -366,7 +400,7 @@ describe('concurrency', () => {
       repo.addItem({ name: 'Tent', placeNames: ['Attic', 'Suitcase'] }),
       repo.setSetting('device.x', '1'),
       repo.moveItem(drill, null),
-      repo.setEmbedding(drill, new Uint8Array(4), 'm'),
+      repo.setEmbedding(drill, new Uint8Array(4), 'm', 0),
       repo.renameLocation(garage, 'Shed'),
       repo.lendItem(drill, { person: 'Sam' }),
       repo.addItem({ name: 'Saw', locationId: garage }),
