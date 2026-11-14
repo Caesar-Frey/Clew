@@ -39,8 +39,11 @@ export function endOfDay(t: number): number {
   return d.getTime();
 }
 
+/** The end of the day `days` calendar days from now (a week is 7 days, even across a DST change). */
 export function daysFromNow(days: number, now = Date.now()): number {
-  return endOfDay(now + days * DAY);
+  const d = new Date(now);
+  d.setDate(d.getDate() + days);
+  return endOfDay(d.getTime());
 }
 
 export type DueState = 'none' | 'ok' | 'soon' | 'overdue';

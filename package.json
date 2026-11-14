@@ -77,6 +77,7 @@
     },
     "transformIgnorePatterns": [
       "/node_modules/(?!@noble/)"
-    ]
+    ],
+    "globalSetup": "<rootDir>/__tests__/globalSetup.js"
   }
 }

@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Alert, AppState, Linking, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { canSealWithBiometrics, canUseDeviceAuth, RELOCK_AFTER_MS, useAppLock } from '@/security/lock';
@@ -20,16 +20,21 @@ export default function DeskScreen() {
   const insets = useSafeAreaInsets();
   const { items, locations, settings, actions } = useData();
   const [permission, setPermission] = useState<ReminderPermission | null>(null);
-  const remindersOn = settings[REMINDERS_OFF_KEY] !== '1' && permission !== 'denied';
+  // Off until notifications are actually allowed, so the switch never claims reminders that can't arrive.
+  const remindersOn = settings[REMINDERS_OFF_KEY] !== '1' && permission === 'granted';
 
   useEffect(() => {
-    reminderPermission().then(setPermission).catch(() => setPermission('denied'));
+    const check = () => reminderPermission().then(setPermission).catch(() => setPermission('denied'));
+    check();
+    // Coming back from Settings may have changed it.
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
+    return () => sub.remove();
   }, []);
 
   const toggleReminders = async (on: boolean) => {
     if (on && permission !== 'granted') {
       const granted = permission === 'undetermined' && (await askForReminders());
-      setPermission(granted ? 'granted' : 'denied');
+      setPermission(await reminderPermission().catch(() => (granted ? 'granted' : 'denied')));
       if (!granted) {
         Alert.alert('Notifications are off', 'Allow notifications for Clew in Settings to get due-date reminders.', [
           { text: 'Not now', style: 'cancel' },

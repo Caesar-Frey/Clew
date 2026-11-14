@@ -1,9 +1,13 @@
 import type { Item } from '../db/types';
-import { startOfDay } from '../lib/format';
 
-const DAY = 24 * 60 * 60 * 1000;
+/** 09:00 local time, `plusDays` calendar days after the day of `t` (DST-safe). */
+function morningOf(t: number, plusDays = 0): number {
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + plusDays, MORNING_HOUR, 0, 0, 0).getTime();
+}
+
 /** Reminders arrive at 9 in the morning, local time. */
-const MORNING = 9 * 60 * 60 * 1000;
+const MORNING_HOUR = 9;
 /** If it still isn't back, one more nudge this many days later. */
 const NUDGE_AFTER_DAYS = 3;
 /** iOS keeps at most 64 pending local notifications per app. */
@@ -28,8 +32,8 @@ export function planReminders(items: Item[], now: number, discreet: boolean): Pl
   for (const item of items) {
     const loan = item.activeLoan;
     if (!loan?.dueAt) continue;
-    const dueMorning = startOfDay(loan.dueAt) + MORNING;
-    const nudge = dueMorning + NUDGE_AFTER_DAYS * DAY;
+    const dueMorning = morningOf(loan.dueAt);
+    const nudge = morningOf(loan.dueAt, NUDGE_AFTER_DAYS);
     const what = `“${item.name}”`;
     if (dueMorning > now) {
       out.push({

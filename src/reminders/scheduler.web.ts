@@ -6,3 +6,4 @@ export const reminderPermission = async (): Promise<ReminderPermission> => 'deni
 export const askForReminders = async () => false;
 export const syncReminders = async (_plan: PlannedReminder[]) => {};
 export const onReminderOpened = (_cb: (itemId: string) => void) => () => {};
+export const onPermissionChanged = (_cb: () => void) => () => {};
