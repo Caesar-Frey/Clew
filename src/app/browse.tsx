@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, SectionList, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +13,8 @@ export default function BrowseScreen() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { items, index } = useData();
-  const [filter, setFilter] = useState<BrowseFilter>({ kind: 'all' });
+  const params = useLocalSearchParams<{ filter?: string }>();
+  const [filter, setFilter] = useState<BrowseFilter>(params.filter === 'none' ? { kind: 'none' } : { kind: 'all' });
   const sections = useMemo(() => browseSections(items, index, filter), [items, index, filter]);
   const roots = index.children.get(null) ?? [];
   const unplaced = items.some((i) => i.locationId === null);

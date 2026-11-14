@@ -10,7 +10,7 @@ import { callNumber } from '@/lib/format';
 import { PlaceExistsError, useData } from '@/state/data';
 import { useToast } from '@/ui/toast';
 import { KeyboardScreen, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
-import { BinIcon, NewCardIcon, PencilIcon } from '@/ui/icons';
+import { BinIcon, NewCardIcon, PencilIcon, ReshelveIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
 
 export default function PlaceScreen() {
@@ -73,20 +73,20 @@ export default function PlaceScreen() {
 
   const remove = () =>
     Alert.alert(
-      `Remove “${place.name}”?`,
+      `Delete the place “${place.name}”?`,
       place.parentId
         ? `Everything inside moves up to “${index.byId.get(place.parentId)?.name}”. Nothing is deleted.`
-        : 'Everything inside stays in your catalog. Things directly here become unshelved.',
+        : 'Everything inside stays in your catalog. Things directly here will have no place.',
       [
         { text: 'Keep', style: 'cancel' },
         {
-          text: 'Remove',
+          text: 'Delete place',
           style: 'destructive',
           onPress: async () => {
             goBackOrHome();
             await actions
               .deletePlace(id)
-              .catch((e: unknown) => Alert.alert("Couldn't remove it", e instanceof Error ? e.message : String(e)));
+              .catch((e: unknown) => Alert.alert("Couldn't delete it", e instanceof Error ? e.message : String(e)));
           },
         },
       ],
@@ -177,13 +177,25 @@ export default function PlaceScreen() {
                     style={{ flex: 1 }}
                     compact
                     tone="ghost"
-                    label="+ Inside"
+                    label="Move this place"
+                    icon={(c) => <ReshelveIcon size={16} color={c} />}
+                    onPress={() => router.push({ pathname: '/move-place/[id]', params: { id } })}
+                  />
+                </View>
+              )}
+              {mode === 'view' && (
+                <View style={styles.row}>
+                  <LibraryButton
+                    style={{ flex: 1 }}
+                    compact
+                    tone="ghost"
+                    label="+ Place inside"
                     onPress={() => {
                       setText('');
                       setMode('inside');
                     }}
                   />
-                  <LibraryButton compact tone="ghost" label="" accessibilityLabel={`Remove ${place.name}`} icon={(c) => <BinIcon size={18} color={c} />} onPress={remove} />
+                  <LibraryButton style={{ flex: 1 }} compact tone="ghost" label="Delete" icon={(c) => <BinIcon size={16} color={c} />} onPress={remove} />
                 </View>
               )}
 
