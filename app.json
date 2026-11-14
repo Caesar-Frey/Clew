@@ -77,7 +77,7 @@
         {
           "cameraPermission": "Clew uses the camera to photograph your things and boxes so you can recognise them later.",
           "photosPermission": "Clew lets you pick photos of your things.",
-          "microphonePermission": false
+          "microphonePermission": "Clew listens when you tap the microphone, so you can add or find things by voice."
         }
       ],
       [
