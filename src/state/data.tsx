@@ -122,14 +122,18 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
     getSetting: repo.getSetting,
     setSetting: run(repo.setSetting),
 
-    /** Seals the whole catalog with `passphrase` and opens the share sheet. */
+    /**
+     * Seals the whole catalog with `passphrase` and opens the share sheet.
+     * Nothing is recorded yet: closing the sheet doesn't mean the file was
+     * saved. Call `recordBackup` once the user says it was.
+     */
     exportArchive: async (passphrase: string, onProgress?: (f: number) => void) => {
       const now = Date.now();
       const bytes = await sealArchive(await repo.exclusive(() => dumpCatalog(db, now)), passphrase, { aead: nativeAead, randomBytes, onProgress });
-      await shareArchive(bytes, now);
-      await repo.setSetting(LAST_BACKUP_KEY, String(now));
-      await refresh();
+      const uri = await shareArchive(bytes, now);
+      return { uri, at: now };
     },
+    recordBackup: run((at: number) => repo.setSetting(LAST_BACKUP_KEY, String(at))),
     openArchive: (bytes: Uint8Array, passphrase: string, onProgress?: (f: number) => void) =>
       openArchive(bytes, passphrase, { aead: nativeAead, randomBytes, onProgress }),
     /** Replaces everything with the archived catalog. */

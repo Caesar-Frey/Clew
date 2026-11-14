@@ -12,8 +12,11 @@ import { base64ToBytes } from '../lib/base64';
 /** Our own short-lived files (e.g. a JPEG handed to OCR or the model). */
 const TEMP_DIR = 'clew-tmp';
 
-/** Cache folders that expo-image-picker, expo-image-manipulator and the document picker write into. */
-export const PLAINTEXT_CACHE_DIRS = ['ImagePicker', 'ImageManipulator', 'DocumentPicker', TEMP_DIR];
+/**
+ * Cache folders that expo-image-picker, expo-image-manipulator and the
+ * document picker write into, plus backups waiting to be shared.
+ */
+export const PLAINTEXT_CACHE_DIRS = ['ImagePicker', 'ImageManipulator', 'DocumentPicker', TEMP_DIR, 'clew-share'];
 
 /** Deletes a file by uri; never throws. */
 export function deleteQuietly(uri: string | null | undefined): void {

@@ -1,11 +1,11 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { checkPassphrase, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
-import { pickArchive } from '@/backup/device';
+import { discardShared, pickArchive, shareAgain } from '@/backup/device';
 import { replaceSummary, shortDate, stampDate } from '@/lib/format';
 import { useData } from '@/state/data';
 import { IndexCard, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
@@ -41,6 +41,14 @@ function BackupFlow() {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
+  /** Sealed and handed to the share sheet; waiting for "did you save it?". */
+  const [shared, setShared] = useState<{ uri: string; at: number } | null>(null);
+  const [notYet, setNotYet] = useState(false);
+
+  // The shared file stays until the user leaves or makes another (the
+  // receiving app may still be reading it), and is swept on next start anyway.
+  const sharedUri = shared?.uri ?? null;
+  useEffect(() => () => discardShared(sharedUri), [sharedUri]);
 
   const problem = checkPassphrase(pass) ?? (again && again !== pass ? "The two passphrases don't match." : null);
   const ready = !problem && again === pass && progress === null;
@@ -49,9 +57,8 @@ function BackupFlow() {
     setError(null);
     setProgress(0);
     try {
-      await actions.exportArchive(pass, setProgress);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setDone(Date.now());
+      setShared(await actions.exportArchive(pass, setProgress));
+      setNotYet(false);
       setPass('');
       setAgain('');
     } catch (e) {
@@ -60,6 +67,45 @@ function BackupFlow() {
       setProgress(null);
     }
   };
+
+  const confirmSaved = async () => {
+    if (!shared) return;
+    try {
+      await actions.recordBackup(shared.at);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setDone(shared.at);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  if (shared && done === null) {
+    return (
+      <View style={styles.doneBox}>
+        <T variant="heading" style={{ textAlign: 'center' }} accessibilityRole="header">
+          Did you save the backup file?
+        </T>
+        <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
+          {notYet
+            ? 'No problem. Share it again and choose Files, a cloud drive or a computer.'
+            : 'Closing the share sheet doesn’t save it. Only say yes if the file went somewhere other than this phone.'}
+        </T>
+        {error && (
+          <T variant="typed" color={p.stamp} accessibilityLiveRegion="polite">
+            {error}
+          </T>
+        )}
+        <View style={{ gap: 12, alignSelf: 'stretch' }}>
+          <LibraryButton label="Yes, it's saved" tone="lamp" onPress={confirmSaved} />
+          {notYet ? (
+            <LibraryButton label="Share it again" tone="ghost" onPress={() => shareAgain(shared.uri).catch((e: unknown) => setError(errorText(e)))} />
+          ) : (
+            <LibraryButton label="Not yet" tone="ghost" onPress={() => setNotYet(true)} />
+          )}
+        </View>
+      </View>
+    );
+  }
 
   if (done !== null) {
     return (
