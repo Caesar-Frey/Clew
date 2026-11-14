@@ -1,7 +1,7 @@
-import { scryptAsync } from '@noble/hashes/scrypt.js';
+import { scryptAsync } from "@noble/hashes/scrypt.js";
 
-import { MIGRATIONS } from '../db/schema';
-import type { Db, SqlValue } from '../db/types';
+import { MIGRATIONS } from "../db/schema";
+import type { Db, SqlValue } from "../db/types";
 
 /**
  * Encrypted backups ("archives").
@@ -24,13 +24,22 @@ import type { Db, SqlValue } from '../db/types';
 const MAGIC = [0x43, 0x4c, 0x45, 0x57]; // "CLEW"
 const LEGACY_MAGIC = [0x57, 0x48, 0x42, 0x4b]; // "WHBK", from the Whereabouts days
 const FORMAT_VERSION = 1;
-export const ARCHIVE_EXTENSION = 'clew';
+export const ARCHIVE_EXTENSION = "clew";
 
-const DUMP_FORMATS = ['clew-catalog', 'whereabouts-catalog'];
-const HEADER_APPS = ['clew', 'whereabouts'];
+const DUMP_FORMATS = ["clew-catalog", "whereabouts-catalog"];
+const HEADER_APPS = ["clew", "whereabouts"];
 
 /** Tables in insert order (parents before children). */
-export const BACKUP_TABLES = ['locations', 'items', 'tags', 'item_tags', 'photos', 'loans', 'moves', 'settings'] as const;
+export const BACKUP_TABLES = [
+  "locations",
+  "items",
+  "tags",
+  "item_tags",
+  "photos",
+  "loans",
+  "moves",
+  "settings",
+] as const;
 
 /** Settings that describe this phone, not the catalog, and must not travel. */
 const DEVICE_SETTINGS = /^device\./;
@@ -53,9 +62,19 @@ const MAX_KDF: KdfParams = { N: 2 ** 17, r: 8, p: 1 };
 
 /** AES-256-GCM, provided natively on the phone and by a JS library in tests. */
 export interface Aead {
-  seal(key: Uint8Array, nonce: Uint8Array, plaintext: Uint8Array, aad: Uint8Array): Promise<Uint8Array>;
+  seal(
+    key: Uint8Array,
+    nonce: Uint8Array,
+    plaintext: Uint8Array,
+    aad: Uint8Array,
+  ): Promise<Uint8Array>;
   /** Must reject if the tag doesn't verify. */
-  open(key: Uint8Array, nonce: Uint8Array, sealed: Uint8Array, aad: Uint8Array): Promise<Uint8Array>;
+  open(
+    key: Uint8Array,
+    nonce: Uint8Array,
+    sealed: Uint8Array,
+    aad: Uint8Array,
+  ): Promise<Uint8Array>;
 }
 
 export interface ArchiveDeps {
@@ -69,7 +88,7 @@ export interface ArchiveDeps {
 type Row = Record<string, string | number | null | { $hex: string }>;
 
 export interface CatalogDump {
-  format: 'clew-catalog' | 'whereabouts-catalog';
+  format: "clew-catalog" | "whereabouts-catalog";
   schemaVersion: number;
   exportedAt: number;
   tables: Record<string, Row[]>;
@@ -78,21 +97,23 @@ export interface CatalogDump {
 export class NotAnArchiveError extends Error {
   constructor() {
     super("That file isn't a Clew backup.");
-    this.name = 'NotAnArchiveError';
+    this.name = "NotAnArchiveError";
   }
 }
 
 export class WrongPassphraseError extends Error {
   constructor() {
     super("That passphrase doesn't open this backup.");
-    this.name = 'WrongPassphraseError';
+    this.name = "WrongPassphraseError";
   }
 }
 
 export class NewerArchiveError extends Error {
   constructor() {
-    super('This backup was made by a newer version of Clew. Update the app, then try again.');
-    this.name = 'NewerArchiveError';
+    super(
+      "This backup was made by a newer version of Clew. Update the app, then try again.",
+    );
+    this.name = "NewerArchiveError";
   }
 }
 
@@ -102,35 +123,74 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export function toHex(bytes: Uint8Array): string {
-  let s = '';
-  for (const b of bytes) s += b.toString(16).padStart(2, '0');
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
   return s;
 }
 
 export function fromHex(hex: string): Uint8Array {
   if (!/^(?:[0-9a-f]{2})*$/i.test(hex)) throw new NotAnArchiveError();
   const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  for (let i = 0; i < out.length; i++)
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
 /* ----------------------------------------------------------------- dump */
 
+/**
+ * The whole archive is built in memory (JSON, then encrypted), which peaks at
+ * about four times its size. Above this, stop with a clear message instead of
+ * letting the phone kill the app. Streaming the archive would lift the limit.
+ */
+export const MAX_BACKUP_BYTES = 150 * 1024 * 1024;
+
+export class BackupTooLargeError extends Error {
+  constructor(readonly bytes: number) {
+    const mb = (n: number) => Math.round(n / (1024 * 1024));
+    super(
+      `This catalog is too large to back up in one file yet: its photos take ${mb(bytes)} MB and the limit is ${mb(MAX_BACKUP_BYTES)} MB. Removing some photos will let the backup go through.`,
+    );
+    this.name = "BackupTooLargeError";
+  }
+}
+
 /** Reads the whole catalog into plain JSON-safe rows. */
-export async function dumpCatalog(db: Db, now: number): Promise<CatalogDump> {
-  const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+export async function dumpCatalog(
+  db: Db,
+  now: number,
+  maxBytes = MAX_BACKUP_BYTES,
+): Promise<CatalogDump> {
+  const size = await db.getFirstAsync<{ bytes: number | null }>(
+    "SELECT sum(length(data)) + sum(ifnull(length(thumb), 0)) AS bytes FROM photos",
+  );
+  if ((size?.bytes ?? 0) > maxBytes)
+    throw new BackupTooLargeError(size?.bytes ?? 0);
+  const version = await db.getFirstAsync<{ user_version: number }>(
+    "PRAGMA user_version",
+  );
   const tables: Record<string, Row[]> = {};
   for (const table of BACKUP_TABLES) {
-    const rows = await db.getAllAsync<Record<string, SqlValue>>(`SELECT * FROM ${table}`);
+    const rows = await db.getAllAsync<Record<string, SqlValue>>(
+      `SELECT * FROM ${table}`,
+    );
     tables[table] = rows
-      .filter((r) => table !== 'settings' || !DEVICE_SETTINGS.test(String(r.key)))
+      .filter(
+        (r) => table !== "settings" || !DEVICE_SETTINGS.test(String(r.key)),
+      )
       .map((r) => {
         const out: Row = {};
-        for (const [k, v] of Object.entries(r)) out[k] = v instanceof Uint8Array ? { $hex: toHex(v) } : v;
+        for (const [k, v] of Object.entries(r))
+          out[k] = v instanceof Uint8Array ? { $hex: toHex(v) } : v;
         return out;
       });
   }
-  return { format: 'clew-catalog', schemaVersion: version?.user_version ?? 0, exportedAt: now, tables };
+  return {
+    format: "clew-catalog",
+    schemaVersion: version?.user_version ?? 0,
+    exportedAt: now,
+    tables,
+  };
 }
 
 /**
@@ -144,26 +204,32 @@ export async function restoreCatalog(db: Db, dump: CatalogDump): Promise<void> {
   // from the file.
   const columns = new Map<string, Set<string>>();
   for (const table of BACKUP_TABLES) {
-    const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+    const info = await db.getAllAsync<{ name: string }>(
+      `PRAGMA table_info(${table})`,
+    );
     columns.set(table, new Set(info.map((c) => c.name)));
   }
   const locations = reRootBrokenPlaces(dump.tables.locations ?? []);
   await db.withTransactionAsync(async () => {
     // Locations point at their parents, so check foreign keys at commit.
-    await db.execAsync('PRAGMA defer_foreign_keys = ON;');
+    await db.execAsync("PRAGMA defer_foreign_keys = ON;");
     for (const table of [...BACKUP_TABLES].reverse()) {
-      if (table === 'settings') await db.runAsync("DELETE FROM settings WHERE key NOT LIKE 'device.%'");
+      if (table === "settings")
+        await db.runAsync("DELETE FROM settings WHERE key NOT LIKE 'device.%'");
       else await db.runAsync(`DELETE FROM ${table}`);
     }
     for (const table of BACKUP_TABLES) {
       const known = columns.get(table)!;
-      for (const row of table === 'locations' ? locations : (dump.tables[table] ?? [])) {
-        if (table === 'settings' && DEVICE_SETTINGS.test(String(row.key))) continue;
+      for (const row of table === "locations"
+        ? locations
+        : (dump.tables[table] ?? [])) {
+        if (table === "settings" && DEVICE_SETTINGS.test(String(row.key)))
+          continue;
         const cols = Object.keys(row).filter((c) => known.has(c));
         if (cols.length === 0) continue;
         const values = cols.map((c) => decodeValue(row[c]));
         await db.runAsync(
-          `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+          `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
           values,
         );
       }
@@ -178,7 +244,11 @@ export async function restoreCatalog(db: Db, dump: CatalogDump): Promise<void> {
  */
 export function reRootBrokenPlaces(rows: Row[]): Row[] {
   const parentOf = new Map<string, string | null>();
-  for (const r of rows) parentOf.set(String(r.id), typeof r.parent_id === 'string' ? r.parent_id : null);
+  for (const r of rows)
+    parentOf.set(
+      String(r.id),
+      typeof r.parent_id === "string" ? r.parent_id : null,
+    );
   for (const [id, parent] of parentOf) {
     if (parent !== null && !parentOf.has(parent)) parentOf.set(id, null);
   }
@@ -195,12 +265,16 @@ export function reRootBrokenPlaces(rows: Row[]): Row[] {
       cur = parentOf.get(cur) ?? null;
     }
   }
-  return rows.map((r) => (parentOf.get(String(r.id)) === (r.parent_id ?? null) ? r : { ...r, parent_id: parentOf.get(String(r.id)) ?? null }));
+  return rows.map((r) =>
+    parentOf.get(String(r.id)) === (r.parent_id ?? null)
+      ? r
+      : { ...r, parent_id: parentOf.get(String(r.id)) ?? null },
+  );
 }
 
 function decodeValue(v: Row[string] | undefined): SqlValue {
   if (v === undefined || v === null) return null;
-  if (typeof v === 'string' || typeof v === 'number') return v;
+  if (typeof v === "string" || typeof v === "number") return v;
   return fromHex(v.$hex);
 }
 
@@ -210,21 +284,22 @@ function validateDump(dump: unknown): asserts dump is CatalogDump {
     !!d &&
     DUMP_FORMATS.includes(d.format) &&
     Number.isInteger(d.schemaVersion) &&
-    typeof d.tables === 'object' &&
+    typeof d.tables === "object" &&
     d.tables !== null &&
     Object.values(d.tables).every(
       (rows) =>
         Array.isArray(rows) &&
         rows.every(
           (r) =>
-            typeof r === 'object' &&
+            typeof r === "object" &&
             r !== null &&
             Object.values(r).every(
               (v) =>
                 v === null ||
-                typeof v === 'string' ||
-                typeof v === 'number' ||
-                (typeof v === 'object' && typeof (v as { $hex?: unknown }).$hex === 'string'),
+                typeof v === "string" ||
+                typeof v === "number" ||
+                (typeof v === "object" &&
+                  typeof (v as { $hex?: unknown }).$hex === "string"),
             ),
         ),
     );
@@ -234,8 +309,8 @@ function validateDump(dump: unknown): asserts dump is CatalogDump {
 /* ------------------------------------------------------------- sealing */
 
 interface Header {
-  app: 'clew' | 'whereabouts';
-  kdf: 'scrypt';
+  app: "clew" | "whereabouts";
+  kdf: "scrypt";
   N: number;
   r: number;
   p: number;
@@ -260,40 +335,61 @@ export function summarize(dump: CatalogDump): ArchiveSummary {
   };
 }
 
-async function deriveKey(passphrase: string, salt: Uint8Array, kdf: KdfParams, onProgress?: (f: number) => void) {
-  return scryptAsync(passphrase.normalize('NFKC'), salt, { ...kdf, dkLen: 32, onProgress, asyncTick: 25 });
+async function deriveKey(
+  passphrase: string,
+  salt: Uint8Array,
+  kdf: KdfParams,
+  onProgress?: (f: number) => void,
+) {
+  return scryptAsync(passphrase.normalize("NFKC"), salt, {
+    ...kdf,
+    dkLen: 32,
+    onProgress,
+    asyncTick: 25,
+  });
 }
 
-const words = (p: string) => p.trim().split(/[\s\-_.,]+/).filter((w) => w.length >= 2);
+const words = (p: string) =>
+  p
+    .trim()
+    .split(/[\s\-_.,]+/)
+    .filter((w) => w.length >= 2);
 
 export function checkPassphrase(passphrase: string): string | null {
-  if (passphrase.length < MIN_PASSPHRASE_LENGTH && words(passphrase).length < MIN_PASSPHRASE_WORDS) {
+  if (
+    passphrase.length < MIN_PASSPHRASE_LENGTH &&
+    words(passphrase).length < MIN_PASSPHRASE_WORDS
+  ) {
     return `Use at least ${MIN_PASSPHRASE_LENGTH} characters, or ${MIN_PASSPHRASE_WORDS} words.`;
   }
   return null;
 }
 
-export type Strength = 'too short' | 'fair' | 'good' | 'strong';
+export type Strength = "too short" | "fair" | "good" | "strong";
 
 /** A rough guide shown while typing: more words and more length are what matter. */
 export function passphraseStrength(passphrase: string): Strength {
-  if (checkPassphrase(passphrase)) return 'too short';
+  if (checkPassphrase(passphrase)) return "too short";
   const n = words(passphrase).length;
   const unique = new Set(passphrase.toLowerCase()).size;
-  if (n >= 4 || (passphrase.length >= 20 && unique >= 10)) return 'strong';
-  if (n >= 3 || (passphrase.length >= 14 && unique >= 8)) return 'good';
-  return 'fair';
+  if (n >= 4 || (passphrase.length >= 20 && unique >= 10)) return "strong";
+  if (n >= 3 || (passphrase.length >= 14 && unique >= 8)) return "good";
+  return "fair";
 }
 
-export async function sealArchive(dump: CatalogDump, passphrase: string, deps: ArchiveDeps): Promise<Uint8Array> {
+export async function sealArchive(
+  dump: CatalogDump,
+  passphrase: string,
+  deps: ArchiveDeps,
+): Promise<Uint8Array> {
   const problem = checkPassphrase(passphrase);
   if (problem) throw new Error(problem);
   const kdf = deps.kdf ?? BACKUP_KDF;
   const salt = await deps.randomBytes(16);
   const nonce = await deps.randomBytes(12);
   const header: Header = {
-    app: 'clew',
-    kdf: 'scrypt',
+    app: "clew",
+    kdf: "scrypt",
     ...kdf,
     salt: toHex(salt),
     nonce: toHex(nonce),
@@ -309,7 +405,12 @@ export async function sealArchive(dump: CatalogDump, passphrase: string, deps: A
 
   const key = await deriveKey(passphrase, salt, kdf, deps.onProgress);
   try {
-    const body = await deps.aead.seal(key, nonce, encoder.encode(JSON.stringify(dump)), prefix);
+    const body = await deps.aead.seal(
+      key,
+      nonce,
+      encoder.encode(JSON.stringify(dump)),
+      prefix,
+    );
     const out = new Uint8Array(prefix.length + body.length);
     out.set(prefix, 0);
     out.set(body, prefix.length);
@@ -319,11 +420,20 @@ export async function sealArchive(dump: CatalogDump, passphrase: string, deps: A
   }
 }
 
-function parsePrefix(file: Uint8Array): { header: Header; prefix: Uint8Array; body: Uint8Array } {
+function parsePrefix(file: Uint8Array): {
+  header: Header;
+  prefix: Uint8Array;
+  body: Uint8Array;
+} {
   const magicIs = (m: number[]) => m.every((b, i) => file[i] === b);
-  if (file.length < 9 || !(magicIs(MAGIC) || magicIs(LEGACY_MAGIC))) throw new NotAnArchiveError();
+  if (file.length < 9 || !(magicIs(MAGIC) || magicIs(LEGACY_MAGIC)))
+    throw new NotAnArchiveError();
   if (file[4]! > FORMAT_VERSION) throw new NewerArchiveError();
-  const len = new DataView(file.buffer, file.byteOffset, file.byteLength).getUint32(5);
+  const len = new DataView(
+    file.buffer,
+    file.byteOffset,
+    file.byteLength,
+  ).getUint32(5);
   if (len > 64 * 1024 || 9 + len >= file.length) throw new NotAnArchiveError();
   let header: Header;
   try {
@@ -333,27 +443,52 @@ function parsePrefix(file: Uint8Array): { header: Header; prefix: Uint8Array; bo
   }
   const sane =
     HEADER_APPS.includes(header?.app) &&
-    header.kdf === 'scrypt' &&
+    header.kdf === "scrypt" &&
     // Refuse costs a crafted file could use to hang the phone or run it out of memory.
-    Number.isInteger(header.N) && header.N >= 2 ** 10 && header.N <= MAX_KDF.N && (header.N & (header.N - 1)) === 0 &&
-    Number.isInteger(header.r) && header.r >= 1 && header.r <= MAX_KDF.r &&
-    Number.isInteger(header.p) && header.p >= 1 && header.p <= MAX_KDF.p &&
+    Number.isInteger(header.N) &&
+    header.N >= 2 ** 10 &&
+    header.N <= MAX_KDF.N &&
+    (header.N & (header.N - 1)) === 0 &&
+    Number.isInteger(header.r) &&
+    header.r >= 1 &&
+    header.r <= MAX_KDF.r &&
+    Number.isInteger(header.p) &&
+    header.p >= 1 &&
+    header.p <= MAX_KDF.p &&
     // 16-64 byte salt, 12 byte GCM nonce, as lower-case hex.
-    typeof header.salt === 'string' && /^(?:[0-9a-f]{2}){16,64}$/.test(header.salt) &&
-    typeof header.nonce === 'string' && /^[0-9a-f]{24}$/.test(header.nonce);
+    typeof header.salt === "string" &&
+    /^(?:[0-9a-f]{2}){16,64}$/.test(header.salt) &&
+    typeof header.nonce === "string" &&
+    /^[0-9a-f]{24}$/.test(header.nonce);
   if (!sane) throw new NotAnArchiveError();
-  return { header, prefix: file.subarray(0, 9 + len), body: file.subarray(9 + len) };
+  return {
+    header,
+    prefix: file.subarray(0, 9 + len),
+    body: file.subarray(9 + len),
+  };
 }
 
 /** Reads what an archive holds without the passphrase (the header isn't secret). */
-export function peekArchive(file: Uint8Array): { createdAt: number; summary: ArchiveSummary | null } {
+export function peekArchive(file: Uint8Array): {
+  createdAt: number;
+  summary: ArchiveSummary | null;
+} {
   const { header } = parsePrefix(file);
   return { createdAt: header.createdAt, summary: header.summary ?? null };
 }
 
-export async function openArchive(file: Uint8Array, passphrase: string, deps: ArchiveDeps): Promise<CatalogDump> {
+export async function openArchive(
+  file: Uint8Array,
+  passphrase: string,
+  deps: ArchiveDeps,
+): Promise<CatalogDump> {
   const { header, prefix, body } = parsePrefix(file);
-  const key = await deriveKey(passphrase, fromHex(header.salt), header, deps.onProgress);
+  const key = await deriveKey(
+    passphrase,
+    fromHex(header.salt),
+    header,
+    deps.onProgress,
+  );
   let plain: Uint8Array;
   try {
     plain = await deps.aead.open(key, fromHex(header.nonce), body, prefix);
