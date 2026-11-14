@@ -81,6 +81,10 @@ function UnreadableGate({ onDone }: { onDone: () => void }) {
 
   const restore = async () => {
     if (!picked) return;
+    if (!pass) {
+      setProblem('Enter the passphrase this backup was made with.');
+      return;
+    }
     setProblem(null);
     setBusy('Opening the backup…');
     try {
@@ -126,7 +130,7 @@ function UnreadableGate({ onDone }: { onDone: () => void }) {
           </T>
           <TypedInput label="Backup passphrase" value={pass} onChangeText={setPass} secureTextEntry autoCapitalize="none" autoFocus />
           {error}
-          <LibraryButton label={busy ?? 'Restore'} tone="lamp" disabled={!pass || !!busy} onPress={restore} />
+          <LibraryButton label={busy ?? 'Restore'} tone="lamp" disabled={!!busy} onPress={restore} />
           <LibraryButton label="Choose a different file" tone="ghost" compact disabled={!!busy} onPress={choose} />
           <LibraryButton label="Back" tone="ghost" compact disabled={!!busy} onPress={() => setStep('start')} />
         </Room>
@@ -156,8 +160,8 @@ function UnreadableGate({ onDone }: { onDone: () => void }) {
           <LibraryButton
             label={busy ?? 'Erase and start over'}
             tone="leather"
-            disabled={typed.trim().toUpperCase() !== ERASE_WORD || !!busy}
-            onPress={erase}
+            disabled={!!busy}
+            onPress={() => (typed.trim().toUpperCase() === ERASE_WORD ? erase() : setProblem(`Type ${ERASE_WORD} first.`))}
           />
           <LibraryButton label="Back" tone="ghost" compact disabled={!!busy} onPress={() => setStep('start')} />
         </Room>
@@ -217,6 +221,10 @@ function SealedGate({ error, onRetry }: { error: KeyLockedError; onRetry: () => 
   }
 
   const recover = async () => {
+    if (!pass) {
+      setProblem('Enter your recovery passphrase.');
+      return;
+    }
     setBusy(true);
     setProblem(null);
     try {
@@ -230,35 +238,37 @@ function SealedGate({ error, onRetry }: { error: KeyLockedError; onRetry: () => 
   };
 
   return (
-    <Room style={[styles.center, { alignItems: 'stretch' }]}>
-      <T variant="heading" style={{ textAlign: 'center' }}>
-        {error.invalidated ? 'Face ID or fingerprints changed' : 'Open with your recovery passphrase'}
-      </T>
-      <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
-        {error.invalidated
-          ? 'For your safety the phone no longer releases the catalog key. Enter the recovery passphrase you chose when sealing it.'
-          : 'Enter the recovery passphrase you chose when you sealed the catalog.'}
-      </T>
-      <TypedInput
-        label="Recovery passphrase"
-        value={pass}
-        onChangeText={setPass}
-        secureTextEntry
-        autoCapitalize="none"
-        autoFocus
-        onSubmitEditing={() => pass && recover()}
-      />
-      {problem && (
-        <T variant="small" color={p.stamp} style={{ textAlign: 'center' }}>
-          {problem}
+    <KeyboardScreen>
+      <Room style={[styles.center, { alignItems: 'stretch' }]}>
+        <T variant="heading" style={{ textAlign: 'center' }}>
+          {error.invalidated ? 'Face ID or fingerprints changed' : 'Open with your recovery passphrase'}
         </T>
-      )}
-      <LibraryButton label={busy ? 'Opening…' : 'Open the catalog'} tone="lamp" disabled={!pass || busy} onPress={recover} />
-      {!error.invalidated && <LibraryButton label="Back" tone="ghost" compact onPress={() => setRecovering(false)} />}
-      <T variant="small" style={{ textAlign: 'center' }}>
-        Afterwards the key is kept the ordinary way. You can seal it again from the Desk.
-      </T>
-    </Room>
+        <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
+          {error.invalidated
+            ? 'For your safety the phone no longer releases the catalog key. Enter the recovery passphrase you chose when sealing it.'
+            : 'Enter the recovery passphrase you chose when you sealed the catalog.'}
+        </T>
+        <TypedInput
+          label="Recovery passphrase"
+          value={pass}
+          onChangeText={setPass}
+          secureTextEntry
+          autoCapitalize="none"
+          autoFocus
+          onSubmitEditing={() => pass && recover()}
+        />
+        {problem && (
+          <T variant="small" color={p.stamp} style={{ textAlign: 'center' }}>
+            {problem}
+          </T>
+        )}
+        <LibraryButton label={busy ? 'Opening…' : 'Open the catalog'} tone="lamp" disabled={busy} onPress={recover} />
+        {!error.invalidated && <LibraryButton label="Back" tone="ghost" compact onPress={() => setRecovering(false)} />}
+        <T variant="small" style={{ textAlign: 'center' }}>
+          Afterwards the key is kept the ordinary way. You can seal it again from the Desk.
+        </T>
+      </Room>
+    </KeyboardScreen>
   );
 }
 

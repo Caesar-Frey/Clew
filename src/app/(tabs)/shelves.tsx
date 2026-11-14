@@ -7,7 +7,7 @@ import { useBoxMatcher } from '@/components/BoxScanner';
 import { ItemCard } from '@/components/ItemCard';
 import { PlaceExistsError, useData } from '@/state/data';
 import { useToast } from '@/ui/toast';
-import { IndexCard, LibraryButton, Room, SectionLabel, spineColor, Stamp, T, TypedInput } from '@/ui/components';
+import { IndexCard, KeyboardScreen, LibraryButton, Room, SectionLabel, spineColor, Stamp, T, TypedInput } from '@/ui/components';
 import { CameraIcon, ChevronIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
 
@@ -19,6 +19,7 @@ export default function ShelvesScreen() {
   const [adding, setAdding] = useState(false);
   const [newPath, setNewPath] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const { hasBoxes } = useBoxMatcher();
   const toast = useToast();
 
@@ -34,6 +35,12 @@ export default function ShelvesScreen() {
   const unshelved = items.filter((i) => !i.locationId && !i.activeLoan);
 
   const create = async () => {
+    if (creating) return;
+    if (!newPath.trim()) {
+      setError('Type a place name.');
+      return;
+    }
+    setCreating(true);
     try {
       await actions.addPlace(newPath);
       setNewPath('');
@@ -49,11 +56,14 @@ export default function ShelvesScreen() {
         return;
       }
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
     }
   };
 
   return (
     <Room>
+      <KeyboardScreen>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: insets.top + 12, paddingHorizontal: 18, paddingBottom: 32, gap: 14 }}>
         <View>
           <T variant="label" color={p.headRule}>
@@ -116,7 +126,7 @@ export default function ShelvesScreen() {
             )}
             <View style={styles.row}>
               <LibraryButton style={{ flex: 1 }} compact tone="ghost" label="Cancel" onPress={() => setAdding(false)} />
-              <LibraryButton style={{ flex: 1 }} compact tone="lamp" label="Add place" disabled={!newPath.trim()} onPress={create} />
+              <LibraryButton style={{ flex: 1 }} compact tone="lamp" label={creating ? 'Adding…' : 'Add place'} disabled={creating} onPress={create} />
             </View>
           </View>
         ) : (
@@ -132,6 +142,7 @@ export default function ShelvesScreen() {
           </View>
         )}
       </ScrollView>
+      </KeyboardScreen>
     </Room>
   );
 }

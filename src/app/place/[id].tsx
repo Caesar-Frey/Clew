@@ -9,7 +9,7 @@ import { ItemCard } from '@/components/ItemCard';
 import { callNumber } from '@/lib/format';
 import { PlaceExistsError, useData } from '@/state/data';
 import { useToast } from '@/ui/toast';
-import { LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
+import { KeyboardScreen, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
 import { BinIcon, NewCardIcon, PencilIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
 
@@ -22,6 +22,7 @@ export default function PlaceScreen() {
   const [mode, setMode] = useState<'view' | 'rename' | 'inside'>('view');
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
 
   const here = useMemo(() => items.filter((i) => i.locationId === id), [items, id]);
@@ -44,6 +45,12 @@ export default function PlaceScreen() {
   const kids = index.children.get(id) ?? [];
 
   const submit = async () => {
+    if (busy) return;
+    if (!text.trim()) {
+      setError(mode === 'rename' ? 'Type a new name.' : 'Type a place name.');
+      return;
+    }
+    setBusy(true);
     try {
       if (mode === 'rename') await actions.renamePlace(id, text);
       else await actions.addPlace(text, id);
@@ -58,6 +65,8 @@ export default function PlaceScreen() {
         return;
       }
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -85,6 +94,7 @@ export default function PlaceScreen() {
   return (
     <Room>
       <Stack.Screen options={{ title: place.name }} />
+      <KeyboardScreen>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 32, gap: 16 }}>
         <View style={{ gap: 4 }}>
           <T variant="small" color={p.headRule} style={{ letterSpacing: 1.5 }}>
@@ -133,13 +143,13 @@ export default function PlaceScreen() {
               onSubmitEditing={submit}
             />
             {error && (
-              <T variant="small" color={p.stamp}>
+              <T variant="small" color={p.stamp} accessibilityLiveRegion="polite">
                 {error}
               </T>
             )}
             <View style={styles.row}>
               <LibraryButton style={{ flex: 1 }} compact tone="ghost" label="Cancel" onPress={() => setMode('view')} />
-              <LibraryButton style={{ flex: 1 }} compact tone="lamp" label="Save" disabled={!text.trim()} onPress={submit} />
+              <LibraryButton style={{ flex: 1 }} compact tone="lamp" label={busy ? 'Saving…' : 'Save'} disabled={busy} onPress={submit} />
             </View>
           </View>
         ) : (
@@ -192,6 +202,7 @@ export default function PlaceScreen() {
 
         <BoxFingerprintCard locationId={id} name={place.name} />
       </ScrollView>
+      </KeyboardScreen>
     </Room>
   );
 }

@@ -618,6 +618,16 @@ export function createRepo(db: Db, deps: RepoDeps) {
     );
   }
 
+  /** Takes back a loan made by mistake (only while it's still open). */
+  async function undoLend(loanId: string): Promise<void> {
+    await db.withTransactionAsync(async () => {
+      const loan = await db.getFirstAsync<LoanRow>('SELECT * FROM loans WHERE id = ? AND returned_at IS NULL', [loanId]);
+      if (!loan) return;
+      await db.runAsync('DELETE FROM loans WHERE id = ?', [loanId]);
+      await db.runAsync('UPDATE items SET updated_at = ? WHERE id = ?', [now(), loan.item_id]);
+    });
+  }
+
   async function setLoanDue(loanId: string, dueAt: number | null): Promise<void> {
     await db.runAsync('UPDATE loans SET due_at = ? WHERE id = ?', [dueAt, loanId]);
   }
@@ -810,6 +820,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
       lendItem,
       returnItem,
       undoReturn,
+      undoLend,
       setLoanDue,
       listItems,
       itemHistory,

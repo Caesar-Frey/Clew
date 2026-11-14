@@ -11,10 +11,11 @@ import { SuggestSubjects } from '@/components/SuggestSubjects';
 import type { HistoryEvent } from '@/db/types';
 import { callNumber, dueState, relativeDays, shortDate, stampDate } from '@/lib/format';
 import { useData, useItem, useRecentPlaces } from '@/state/data';
-import { BrassPlate, IndexCard, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
-import { BinIcon, CameraIcon, CheckedOutIcon, PencilIcon, ReshelveIcon, StampIcon } from '@/ui/icons';
+import { BrassPlate, IndexCard, KeyboardScreen, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
+import { BinIcon, CameraIcon, CheckedOutIcon, ReshelveIcon, StampIcon } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
 import { useToast } from '@/ui/toast';
+import { useDiscardGuard } from '@/ui/useDiscardGuard';
 
 export default function ItemScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -25,8 +26,16 @@ export default function ItemScreen() {
   const recent = useRecentPlaces(10);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [stamp, setStamp] = useState<{ text: string; sub?: string; color: string; key: number } | null>(null);
-  const [editing, setEditing] = useState(false);
+  /** The card being edited, or null when just viewing. */
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editing = draft !== null;
   const toast = useToast();
+  const initialDraft = (): Draft => ({ name: item?.name ?? '', tags: item?.tags.join(', ') ?? '', notes: item?.notes ?? '', aiTags: [] });
+  const dirty =
+    !!draft && !!item && (draft.name !== item.name || draft.tags !== item.tags.join(', ') || draft.notes !== (item.notes ?? ''));
+  useDiscardGuard(dirty && !saving, 'Discard your changes?');
   const cover = useFullPhoto(item?.photoIds[0]);
 
   useEffect(() => {
@@ -96,19 +105,44 @@ export default function ItemScreen() {
     }
   };
 
+  const saveEdit = async () => {
+    if (!draft || saving) return;
+    if (!draft.name.trim()) {
+      setEditError('Give it a name first.');
+      return;
+    }
+    setSaving(true);
+    setEditError(null);
+    try {
+      const tags = tagList(draft.tags);
+      await actions.updateItem(item.id, { name: draft.name, notes: draft.notes, tags, aiTags: draft.aiTags.filter((t) => tags.includes(t)) });
+      setDraft(null);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const headerColor = p.scheme === 'dark' ? p.brass : p.leatherText;
+
   return (
     <Room>
       <Stack.Screen
         options={{
           title: '',
-          headerRight: () => (
-            <Pressable accessibilityLabel="Edit card" hitSlop={12} onPress={() => setEditing((e) => !e)}>
-              <PencilIcon size={22} color={p.scheme === 'dark' ? p.brass : p.leatherText} />
-            </Pressable>
-          ),
+          headerLeft: editing
+            ? () => <HeaderText label="Cancel" color={headerColor} onPress={() => (setDraft(null), setEditError(null))} />
+            : undefined,
+          headerRight: () =>
+            editing ? (
+              <HeaderText label={saving ? 'Saving…' : 'Save'} color={headerColor} bold onPress={saveEdit} />
+            ) : (
+              <HeaderText label="Edit" color={headerColor} onPress={() => setDraft(initialDraft())} />
+            ),
         }}
       />
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 32, gap: 20 }}>
+      <KeyboardScreen>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 32, gap: 20 }}>
         <IndexCard>
           <View style={{ gap: 10 }}>
             <View style={styles.cardTop}>
@@ -119,16 +153,8 @@ export default function ItemScreen() {
                 Card since {shortDate(item.createdAt)}
               </T>
             </View>
-            {editing ? (
-              <EditFields
-                initial={{ name: item.name, tags: item.tags.join(', '), notes: item.notes ?? '' }}
-                photo={cover?.data ?? item.cover ?? null}
-                onDone={async (v) => {
-                  const tags = tagList(v.tags);
-                  await actions.updateItem(item.id, { name: v.name, notes: v.notes, tags, aiTags: v.aiTags.filter((t) => tags.includes(t)) });
-                  setEditing(false);
-                }}
-              />
+            {draft ? (
+              <EditFields value={draft} onChange={setDraft} photo={cover?.data ?? item.cover ?? null} error={editError} />
             ) : (
               <>
                 {item.photoIds.length > 0 && (
@@ -257,7 +283,26 @@ export default function ItemScreen() {
 
         <LibraryButton label="Withdraw from catalog" tone="ghost" icon={(c) => <BinIcon size={18} color={c} />} onPress={withdraw} />
       </ScrollView>
+      </KeyboardScreen>
     </Room>
+  );
+}
+
+interface Draft {
+  name: string;
+  tags: string;
+  notes: string;
+  /** Tags the user took from the assistant. */
+  aiTags: string[];
+}
+
+function HeaderText({ label, color, bold, onPress }: { label: string; color: string; bold?: boolean; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={10} style={styles.headerButton}>
+      <T variant="typed" color={color} style={bold ? { fontFamily: fonts.typedBold } : undefined}>
+        {label}
+      </T>
+    </Pressable>
   );
 }
 
@@ -271,41 +316,35 @@ const showError = (e: unknown) =>
   Alert.alert("That didn't save", e instanceof Error ? e.message : String(e));
 
 function EditFields({
-  initial,
+  value: v,
+  onChange,
   photo,
-  onDone,
+  error,
 }: {
-  initial: { name: string; tags: string; notes: string };
+  value: Draft;
+  onChange: (next: Draft | ((cur: Draft | null) => Draft | null)) => void;
   /** Cover photo (base64 JPEG) for the assistant to look at. */
   photo: string | null;
-  onDone: (v: { name: string; tags: string; notes: string; aiTags: string[] }) => Promise<void>;
+  error: string | null;
 }) {
   const p = usePalette();
-  const [v, setV] = useState({ ...initial, aiTags: [] as string[] });
-  const [error, setError] = useState<string | null>(null);
   return (
     <View style={{ gap: 16 }}>
-      <TypedInput big value={v.name} onChangeText={(name) => setV({ ...v, name })} autoFocus accessibilityLabel="Name" />
-      <TypedInput label="Subjects (comma separated)" value={v.tags} onChangeText={(tags) => setV({ ...v, tags })} autoCapitalize="none" />
+      <TypedInput big value={v.name} onChangeText={(name) => onChange({ ...v, name })} autoFocus accessibilityLabel="Name" />
+      <TypedInput label="Tags (comma separated)" value={v.tags} onChangeText={(tags) => onChange({ ...v, tags })} autoCapitalize="none" />
       <SuggestSubjects
         name={v.name}
         notes={v.notes}
         photo={photo ? { base64: photo } : null}
         tags={v.tags}
-        onTag={(t) => setV((cur) => ({ ...cur, tags: withTag(cur.tags, t), aiTags: [...cur.aiTags, t] }))}
+        onTag={(t) => onChange((cur) => (cur ? { ...cur, tags: withTag(cur.tags, t), aiTags: [...cur.aiTags, t] } : cur))}
       />
-      <TypedInput label="Notes" value={v.notes} onChangeText={(notes) => setV({ ...v, notes })} multiline />
+      <TypedInput label="Notes" value={v.notes} onChangeText={(notes) => onChange({ ...v, notes })} multiline />
       {error && (
-        <T variant="small" color={p.stamp}>
+        <T variant="small" color={p.stamp} accessibilityLiveRegion="polite">
           {error}
         </T>
       )}
-      <LibraryButton
-        label="Save card"
-        tone="lamp"
-        compact
-        onPress={() => onDone(v).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))}
-      />
     </View>
   );
 }
@@ -359,6 +398,7 @@ const styles = StyleSheet.create({
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   addPhoto: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' },
   row: { flexDirection: 'row', gap: 10 },
+  headerButton: { minHeight: 44, minWidth: 44, justifyContent: 'center', paddingHorizontal: 4 },
   slip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 2, padding: 14 },
   slipRow: { flexDirection: 'row', gap: 12, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   slipDate: { width: 98, fontFamily: fonts.stamp, fontSize: 12 },

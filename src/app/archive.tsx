@@ -1,16 +1,16 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { goBackOrHome } from '@/lib/nav';
 import { checkPassphrase, passphraseStrength, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
 import { discardShared, pickArchive, shareAgain } from '@/backup/device';
 import { replaceSummary, shortDate, stampDate } from '@/lib/format';
 import { useData } from '@/state/data';
-import { IndexCard, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
+import { IndexCard, KeyboardScreen, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
+import { useDiscardGuard } from '@/ui/useDiscardGuard';
 
 /** Make an encrypted backup, or restore one (`?mode=restore`). */
 export default function ArchiveScreen() {
@@ -20,11 +20,11 @@ export default function ArchiveScreen() {
   return (
     <Room>
       <Stack.Screen options={{ title: restoring ? 'Restore a backup' : 'Make a backup' }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardScreen>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 18 }}>
           {restoring ? <RestoreFlow /> : <BackupFlow />}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardScreen>
     </Room>
   );
 }
@@ -53,8 +53,13 @@ function BackupFlow() {
 
   const problem = checkPassphrase(pass) ?? (again && again !== pass ? "The two passphrases don't match." : null);
   const ready = !problem && again === pass && progress === null;
+  const { leave } = useDiscardGuard(!!(pass || again) && progress === null, 'Stop making the backup?');
 
   const seal = async () => {
+    if (!ready) {
+      if (progress === null) setError(problem ?? (again !== pass ? "The two passphrases don't match." : 'Type the passphrase twice.'));
+      return;
+    }
     setError(null);
     setProgress(0);
     try {
@@ -115,7 +120,7 @@ function BackupFlow() {
         <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
           Keep the file somewhere other than this phone, and keep the passphrase somewhere safe too. You need both to restore.
         </T>
-        <LibraryButton label="Done" tone="lamp" onPress={() => goBackOrHome()} />
+        <LibraryButton label="Done" tone="lamp" onPress={leave} />
       </View>
     );
   }
@@ -151,8 +156,8 @@ function BackupFlow() {
         </T>
       )}
       <LibraryButton
-        label={progress === null ? 'Seal and save' : `Sealing… ${Math.round(progress * 100)}%`}
-        disabled={!ready}
+        label={progress === null ? 'Encrypt and save backup' : `Encrypting… ${Math.round(progress * 100)}%`}
+        disabled={progress !== null}
         onPress={seal}
       />
     </>
@@ -170,6 +175,7 @@ function RestoreFlow() {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<CatalogDump | null>(null);
+  useDiscardGuard(!!pass && !done && progress === null, 'Stop restoring?');
 
   const choose = async () => {
     setError(null);
@@ -195,6 +201,10 @@ function RestoreFlow() {
 
   const open = async () => {
     if (!picked) return;
+    if (!pass) {
+      setError('Enter the passphrase this backup was made with.');
+      return;
+    }
     setError(null);
     setProgress(0);
     let dump: CatalogDump;
@@ -264,7 +274,7 @@ function RestoreFlow() {
           <LibraryButton
             label={progress === null ? 'Open and restore' : `Opening… ${Math.round(progress * 100)}%`}
             tone="lamp"
-            disabled={!pass || progress !== null}
+            disabled={progress !== null}
             onPress={open}
           />
         </>

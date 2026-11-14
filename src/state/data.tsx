@@ -101,6 +101,7 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
     lendItem: run(repo.lendItem),
     returnItem: run(repo.returnItem),
     undoReturn: run(repo.undoReturn),
+    undoLend: run(repo.undoLend),
     setLoanDue: run(repo.setLoanDue),
     /**
      * Creates a place from a typed path below `parentId`. If the whole path
