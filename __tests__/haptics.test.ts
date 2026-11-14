@@ -1,31 +1,30 @@
-const mockSelection = jest.fn(() => Promise.resolve());
-const mockImpact = jest.fn(() => Promise.resolve());
-const mockNotify = jest.fn(() => Promise.resolve());
+import * as Haptics from 'expo-haptics';
+
+import { haptic, setHapticsEnabled } from '../src/ui/haptics';
+
 jest.mock('expo-haptics', () => ({
-  selectionAsync: mockSelection,
-  impactAsync: mockImpact,
-  notificationAsync: mockNotify,
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  impactAsync: jest.fn(() => Promise.resolve()),
+  notificationAsync: jest.fn(() => Promise.resolve()),
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
   NotificationFeedbackType: { Success: 'success' },
 }));
-
-import { haptic, setHapticsEnabled } from '../src/ui/haptics';
 
 describe('haptics switch', () => {
   it('buzzes while on and stays silent while off', async () => {
     await haptic.selection();
     await haptic.impact('heavy');
     await haptic.success();
-    expect(mockSelection).toHaveBeenCalledTimes(1);
-    expect(mockImpact).toHaveBeenCalledWith('heavy');
-    expect(mockNotify).toHaveBeenCalledWith('success');
+    expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);
+    expect(Haptics.impactAsync).toHaveBeenCalledWith('heavy');
+    expect(Haptics.notificationAsync).toHaveBeenCalledWith('success');
 
     setHapticsEnabled(false);
     await haptic.selection();
     await haptic.impact('light');
     await haptic.success();
-    expect(mockSelection).toHaveBeenCalledTimes(1);
-    expect(mockImpact).toHaveBeenCalledTimes(1);
-    expect(mockNotify).toHaveBeenCalledTimes(1);
+    expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+    expect(Haptics.notificationAsync).toHaveBeenCalledTimes(1);
   });
 });
