@@ -1,3 +1,4 @@
+import { decodeFingerprint, MAX_VIEWS } from '../src/boxes/fingerprint';
 import { buildLocationIndex } from '../src/lib/locations';
 import { MIGRATIONS, migrate } from '../src/db/schema';
 import { testRepo } from './testDb';
@@ -281,6 +282,24 @@ describe('boxes', () => {
     expect([...info!.fingerprint!]).toEqual([1, 2, 3]);
     await repo.clearBox(box);
     expect(await repo.listBoxes()).toEqual([]);
+  });
+
+  it('deletes the photo of a view that falls off the cap, with the fingerprint, in one go', async () => {
+    const { repo } = await testRepo();
+    const box = await repo.ensureLocationPath(['Garage', 'Blue box']);
+    const v = (n: number) => ({ words: n % 2 ? ['camping'] : [], text: '', hist: [n], grid: [] });
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_VIEWS + 2; i++) {
+      ids.push(await repo.addBoxView(box, v(i), { data: `d${i}`, thumb: `t${i}`, width: 1, height: 1 }));
+    }
+    const [info] = await repo.listBoxes();
+    const fp = decodeFingerprint(info!.fingerprint)!;
+    expect(fp.views).toHaveLength(MAX_VIEWS);
+    expect(info!.photoIds).toHaveLength(MAX_VIEWS);
+    expect(new Set(info!.photoIds)).toEqual(new Set(fp.views.map((x) => x.photoId)));
+    expect(await repo.getPhoto(ids[0]!)).toBeNull();
+    expect(await repo.getPhoto(ids.at(-1)!)).not.toBeNull();
+    await expect(repo.addBoxView('nope', v(1), { data: 'd', thumb: 't', width: 1, height: 1 })).rejects.toThrow(/no longer exists/);
   });
 });
 

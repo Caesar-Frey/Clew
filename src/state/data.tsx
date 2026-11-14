@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { addView, decodeFingerprint, encodeFingerprint, FINGERPRINT_MODEL, type Fingerprint, type FingerprintView } from '../boxes/fingerprint';
+import { decodeFingerprint, type Fingerprint } from '../boxes/fingerprint';
 import { dumpCatalog, openArchive, restoreCatalog, sealArchive, type CatalogDump } from '../backup/archive';
 import { nativeAead, randomBytes, shareArchive } from '../backup/device';
 import { openEncryptedDatabase } from '../db/open';
@@ -136,12 +136,9 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
     restoreArchive: run((dump: CatalogDump) => restoreCatalog(db, dump)),
 
     /** Adds a photo of a box (and what was read from it) to its fingerprint. */
-    addBoxView: run(async (locationId: string, view: FingerprintView, photo: PhotoInput) => {
-      const current = (await repo.listBoxes()).find((b) => b.locationId === locationId);
-      const fp = addView(decodeFingerprint(current?.fingerprint ?? null), view);
-      await repo.setFingerprint(locationId, encodeFingerprint(fp), FINGERPRINT_MODEL);
-      await repo.addPhoto({ locationId }, { ...photo, kind: view.words.length ? 'label' : 'box' });
-    }),
+    addBoxView: run(repo.addBoxView),
+    /** The id for a chosen place, creating it if the user chose "Create new place". */
+    ensurePlace: run(resolvePlace),
     clearBox: run(repo.clearBox),
 
     // Embeddings change nothing visible, so they don't refresh the snapshot.

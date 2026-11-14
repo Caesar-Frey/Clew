@@ -1,3 +1,11 @@
+import {
+  addViewDropping,
+  decodeFingerprint,
+  encodeFingerprint,
+  FINGERPRINT_MODEL,
+  MAX_VIEWS,
+  type FingerprintView,
+} from '../boxes/fingerprint';
 import { buildLocationIndex, PATH_SEPARATOR } from '../lib/locations';
 import type { BoxInfo, Db, HistoryEvent, Item, Loan, Location, Photo, PhotoInput, SqlValue } from './types';
 
@@ -668,6 +676,42 @@ export function createRepo(db: Db, deps: RepoDeps) {
     await db.runAsync('UPDATE locations SET fingerprint = ?, fingerprint_model = ? WHERE id = ?', [fingerprint, model, locationId]);
   }
 
+  /**
+   * Adds a photo of a box and its fingerprint view in one transaction. When
+   * the view cap pushes an old view out, that view's photo goes with it, and
+   * the place never keeps more box photos than views.
+   */
+  async function addBoxView(locationId: string, view: FingerprintView, photo: PhotoInput): Promise<string> {
+    const t = now();
+    let photoId = '';
+    await db.withTransactionAsync(async () => {
+      const row = await db.getFirstAsync<{ fingerprint: Uint8Array | null }>('SELECT fingerprint FROM locations WHERE id = ?', [locationId]);
+      if (!row) throw new Error('That place no longer exists');
+      photoId = await insertPhoto({ locationId }, { ...photo, kind: view.words.length ? 'label' : 'box' }, t);
+      const current = decodeFingerprint(row.fingerprint ? new Uint8Array(row.fingerprint) : null);
+      const { fingerprint, dropped } = addViewDropping(current, { ...view, photoId });
+      await db.runAsync('UPDATE locations SET fingerprint = ?, fingerprint_model = ? WHERE id = ?', [
+        encodeFingerprint(fingerprint),
+        FINGERPRINT_MODEL,
+        locationId,
+      ]);
+      for (const v of dropped) if (v.photoId) await db.runAsync('DELETE FROM photos WHERE id = ? AND location_id = ?', [v.photoId, locationId]);
+      // Older views were saved without a photo id: trim the oldest unreferenced photos.
+      const kept = new Set(fingerprint.views.map((v) => v.photoId).filter(Boolean));
+      const photos = await db.getAllAsync<{ id: string }>(
+        'SELECT id FROM photos WHERE location_id = ? ORDER BY created_at DESC, id DESC',
+        [locationId],
+      );
+      let room = MAX_VIEWS - kept.size;
+      for (const ph of photos) {
+        if (kept.has(ph.id)) continue;
+        if (room > 0) room--;
+        else await db.runAsync('DELETE FROM photos WHERE id = ?', [ph.id]);
+      }
+    });
+    return photoId;
+  }
+
   /** Forgets how to recognise a place: its fingerprint and its own photos. */
   async function clearBox(locationId: string): Promise<void> {
     await db.withTransactionAsync(async () => {
@@ -685,6 +729,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
     allSettings,
     listBoxes,
     setFingerprint,
+    addBoxView,
     listEmbeddings,
     staleEmbeddings,
     setEmbedding,
