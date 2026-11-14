@@ -1,9 +1,10 @@
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { LoanFields, type LoanValue } from '@/components/LoanFields';
 import { askForPhoto, PhotoPlate } from '@/components/PhotoPlate';
 import { PlacePicker, usePlaceField } from '@/components/PlacePicker';
@@ -101,7 +102,7 @@ export default function AddScreen() {
         setPhotos([]);
         nameRef.current?.focus();
       } else {
-        router.back();
+        goBackOrHome();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

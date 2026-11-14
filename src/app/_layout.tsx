@@ -27,6 +27,9 @@ if (Platform.OS !== 'web') sweepPlaintextCaches();
 // The drawer fades into the reading room rather than snapping away.
 SplashScreen.setOptions({ fade: true, duration: 350 });
 
+/** A cold start straight onto a card (e.g. from a reminder) still has the tabs underneath. */
+export const unstable_settings = { initialRouteName: '(tabs)' };
+
 export default function RootLayout() {
   const p = usePalette();
   const [loaded, error] = useFonts({

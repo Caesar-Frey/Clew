@@ -1,8 +1,9 @@
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 
+import { goBackOrHome } from '@/lib/nav';
 import { LoanFields, type LoanValue } from '@/components/LoanFields';
 import { useData, useItem } from '@/state/data';
 import { LibraryButton, Room, T } from '@/ui/components';
@@ -25,7 +26,7 @@ export default function LendScreen() {
       if (existing) await actions.setLoanDue(existing.id, loan.dueAt);
       else await actions.lendItem(item.id, loan);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.back();
+      goBackOrHome();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

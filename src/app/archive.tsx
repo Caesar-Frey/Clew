@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { checkPassphrase, passphraseStrength, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
 import { discardShared, pickArchive, shareAgain } from '@/backup/device';
 import { replaceSummary, shortDate, stampDate } from '@/lib/format';
@@ -114,7 +115,7 @@ function BackupFlow() {
         <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
           Keep the file somewhere other than this phone, and keep the passphrase somewhere safe too. You need both to restore.
         </T>
-        <LibraryButton label="Done" tone="lamp" onPress={() => router.back()} />
+        <LibraryButton label="Done" tone="lamp" onPress={() => goBackOrHome()} />
       </View>
     );
   }

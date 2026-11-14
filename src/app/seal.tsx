@@ -1,9 +1,9 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { checkPassphrase, passphraseStrength } from '@/backup/archive';
 import { SealIncompleteError } from '@/security/keyVault';
 import { useAppLock } from '@/security/lock';
@@ -29,11 +29,11 @@ export default function SealScreen() {
     try {
       await lock.seal(pass);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.back();
+      goBackOrHome();
     } catch (e) {
       if (e instanceof SealIncompleteError) {
         Alert.alert('Sealed', e.message);
-        router.back();
+        goBackOrHome();
         return;
       }
       setError(`Nothing was changed. ${e instanceof Error ? e.message : String(e)}`);

@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useRootNavigationState } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 
@@ -48,7 +48,26 @@ export function ReminderSync() {
   /** Only called from effects. */
   const syncer = () => (syncerRef.current ??= makeSyncer(latest));
 
-  useEffect(() => onReminderOpened((id) => router.push({ pathname: '/item/[id]', params: { id } })), []);
+  // A tapped reminder can arrive before the navigator exists (cold start):
+  // hold it until the root navigator is ready.
+  const navReady = !!useRootNavigationState()?.key;
+  const nav = useRef({ ready: false, pending: null as string | null });
+  useEffect(
+    () =>
+      onReminderOpened((id) => {
+        if (nav.current.ready) router.push({ pathname: '/item/[id]', params: { id } });
+        else nav.current.pending = id;
+      }),
+    [],
+  );
+  useEffect(() => {
+    nav.current.ready = navReady;
+    const id = nav.current.pending;
+    if (navReady && id) {
+      nav.current.pending = null;
+      router.push({ pathname: '/item/[id]', params: { id } });
+    }
+  }, [navReady]);
 
   const off = settings[REMINDERS_OFF_KEY] === '1';
   useEffect(() => {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { askForPhoto, PhotoPlate, useFullPhoto } from '@/components/PhotoPlate';
 import { tagList, withTag } from '@/ai/text';
 import { SuggestSubjects } from '@/components/SuggestSubjects';
@@ -86,7 +87,7 @@ export default function ItemScreen() {
 
   // No "are you sure?": the card can be put back from the notice.
   const withdraw = async () => {
-    router.back();
+    goBackOrHome();
     try {
       const snapshot = await actions.deleteItem(item.id);
       if (snapshot) toast({ message: `Withdrew “${item.name}”`, undo: () => actions.restoreItem(snapshot) });

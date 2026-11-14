@@ -1,7 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView } from 'react-native';
 
+import { goBackOrHome } from '@/lib/nav';
 import { PlacePicker, usePlaceField } from '@/components/PlacePicker';
 import { useData, useItem } from '@/state/data';
 import { KeyboardScreen, LibraryButton, Room, T } from '@/ui/components';
@@ -28,7 +29,7 @@ export default function MoveScreen() {
     setBusy(true);
     try {
       const moveId = await actions.moveItem(item.id, place.value);
-      router.back();
+      goBackOrHome();
       if (moveId) toast({ message: `Moved “${item.name}”`, undo: () => actions.undoMove(moveId) });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

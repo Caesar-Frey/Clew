@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { BoxFingerprintCard } from '@/components/BoxFingerprintCard';
 import { ItemCard } from '@/components/ItemCard';
 import { callNumber } from '@/lib/format';
@@ -72,7 +73,7 @@ export default function PlaceScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            router.back();
+            goBackOrHome();
             await actions
               .deletePlace(id)
               .catch((e: unknown) => Alert.alert("Couldn't remove it", e instanceof Error ? e.message : String(e)));
