@@ -1,19 +1,21 @@
-import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { askForPhoto, PhotoPlate, useFullPhoto } from '@/components/PhotoPlate';
 import { tagList, withTag } from '@/ai/text';
 import { SuggestSubjects } from '@/components/SuggestSubjects';
 import type { HistoryEvent } from '@/db/types';
 import { callNumber, dueState, relativeDays, shortDate, stampDate } from '@/lib/format';
 import { useData, useItem, useRecentPlaces } from '@/state/data';
-import { BrassPlate, IndexCard, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
-import { BinIcon, CameraIcon, CheckedOutIcon, PencilIcon, ReshelveIcon, StampIcon } from '@/ui/icons';
+import { BrassPlate, IndexCard, KeyboardScreen, LibraryButton, Room, SectionLabel, SpineChip, Stamp, T, TypedInput } from '@/ui/components';
+import { CameraIcon, CheckedOutIcon, ReshelveIcon, StampIcon } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
+import { HeaderText } from '@/ui/HeaderText';
 import { useToast } from '@/ui/toast';
+import { useDiscardGuard } from '@/ui/useDiscardGuard';
 
 export default function ItemScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,8 +26,16 @@ export default function ItemScreen() {
   const recent = useRecentPlaces(10);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [stamp, setStamp] = useState<{ text: string; sub?: string; color: string; key: number } | null>(null);
-  const [editing, setEditing] = useState(false);
+  /** The card being edited, or null when just viewing. */
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editing = draft !== null;
   const toast = useToast();
+  const initialDraft = (): Draft => ({ name: item?.name ?? '', tags: item?.tags.join(', ') ?? '', notes: item?.notes ?? '', aiTags: [] });
+  const dirty =
+    !!draft && !!item && (draft.name !== item.name || draft.tags !== item.tags.join(', ') || draft.notes !== (item.notes ?? ''));
+  useDiscardGuard(dirty && !saving, 'Discard your changes?');
   const cover = useFullPhoto(item?.photoIds[0]);
 
   useEffect(() => {
@@ -76,7 +86,6 @@ export default function ItemScreen() {
   const markReturned = async () => {
     try {
       const loanId = await actions.returnItem(item.id);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       flash('Returned', p.stampReturned, todayStamp());
       if (loanId) toast({ message: `Back from ${loan?.person}`, undo: () => actions.undoReturn(loanId).then(() => setStamp(null)) });
     } catch (e) {
@@ -85,13 +94,38 @@ export default function ItemScreen() {
   };
 
   // No "are you sure?": the card can be put back from the notice.
-  const withdraw = async () => {
-    router.back();
+  const remove = async () => {
+    goBackOrHome();
     try {
       const snapshot = await actions.deleteItem(item.id);
-      if (snapshot) toast({ message: `Withdrew “${item.name}”`, undo: () => actions.restoreItem(snapshot) });
+      if (snapshot) toast({ message: `Deleted “${item.name}”`, undo: () => actions.restoreItem(snapshot) });
     } catch (e) {
       showError(e);
+    }
+  };
+  const more = () =>
+    Alert.alert(item.name, undefined, [
+      { text: 'Delete', style: 'destructive', onPress: remove },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  const goesBackTo = () => router.push({ pathname: '/move/[id]', params: { id: item.id } });
+
+  const saveEdit = async () => {
+    if (!draft || saving) return;
+    if (!draft.name.trim()) {
+      setEditError('Give it a name first.');
+      return;
+    }
+    setSaving(true);
+    setEditError(null);
+    try {
+      const tags = tagList(draft.tags);
+      await actions.updateItem(item.id, { name: draft.name, notes: draft.notes, tags, aiTags: draft.aiTags.filter((t) => tags.includes(t)) });
+      setDraft(null);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -100,14 +134,22 @@ export default function ItemScreen() {
       <Stack.Screen
         options={{
           title: '',
-          headerRight: () => (
-            <Pressable accessibilityLabel="Edit card" hitSlop={12} onPress={() => setEditing((e) => !e)}>
-              <PencilIcon size={22} color={p.scheme === 'dark' ? p.brass : p.leatherText} />
-            </Pressable>
-          ),
+          headerLeft: editing
+            ? () => <HeaderText label="Cancel" onPress={() => (setDraft(null), setEditError(null))} />
+            : undefined,
+          headerRight: () =>
+            editing ? (
+              <HeaderText label={saving ? 'Saving…' : 'Save'} bold onPress={saveEdit} />
+            ) : (
+              <View style={styles.row}>
+                <HeaderText label="Edit" onPress={() => setDraft(initialDraft())} />
+                <HeaderText label="⋯" accessibilityLabel="More actions" onPress={more} />
+              </View>
+            ),
         }}
       />
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 32, gap: 20 }}>
+      <KeyboardScreen>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 32, gap: 20 }}>
         <IndexCard>
           <View style={{ gap: 10 }}>
             <View style={styles.cardTop}>
@@ -118,16 +160,8 @@ export default function ItemScreen() {
                 Card since {shortDate(item.createdAt)}
               </T>
             </View>
-            {editing ? (
-              <EditFields
-                initial={{ name: item.name, tags: item.tags.join(', '), notes: item.notes ?? '' }}
-                photo={cover?.data ?? item.cover ?? null}
-                onDone={async (v) => {
-                  const tags = tagList(v.tags);
-                  await actions.updateItem(item.id, { name: v.name, notes: v.notes, tags, aiTags: v.aiTags.filter((t) => tags.includes(t)) });
-                  setEditing(false);
-                }}
-              />
+            {draft ? (
+              <EditFields value={draft} onChange={setDraft} photo={cover?.data ?? item.cover ?? null} error={editError} />
             ) : (
               <>
                 {item.photoIds.length > 0 && (
@@ -141,7 +175,7 @@ export default function ItemScreen() {
                     {item.photoIds.length > 1 && (
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, padding: 4 }}>
                         {item.photoIds.slice(1).map((pid, i) => (
-                          <Thumb key={pid} id={pid} tilt={i % 2 ? 1.5 : -1.5} onPress={() => openPhoto(pid)} />
+                          <Thumb key={pid} id={pid} label={`Photo ${i + 2} of ${item.name}`} tilt={i % 2 ? 1.5 : -1.5} onPress={() => openPhoto(pid)} />
                         ))}
                       </ScrollView>
                     )}
@@ -160,15 +194,21 @@ export default function ItemScreen() {
                       With <T variant="heading">{loan.person}</T> since {shortDate(loan.lentAt)}
                       {loan.dueAt ? `, due ${relativeDays(loan.dueAt)}` : ''}.
                     </T>
+                    <Pressable accessibilityRole="button" onPress={goesBackTo} hitSlop={8} style={{ gap: 2 }}>
+                      <T variant="label">Goes back to</T>
+                      <T variant="typed" color={path.length ? p.ink : p.leatherText}>
+                        {path.length ? `${path.join(' › ')}  ›` : 'Choose a place  ›'}
+                      </T>
+                    </Pressable>
                   </View>
                 ) : path.length ? (
                   <Pressable
                     accessibilityRole="link"
-                    accessibilityLabel={`In ${path.join(', ')}. Open shelf`}
+                    accessibilityLabel={`In ${path.join(', ')}. Open place`}
                     onPress={() => router.push({ pathname: '/place/[id]', params: { id: item.locationId! } })}
                     style={{ gap: 6 }}
                   >
-                    <T variant="label">Shelved at</T>
+                    <T variant="label">It is in</T>
                     <View style={styles.pathWrap}>
                       {path.map((n, i) => (
                         <View key={i} style={styles.pathPart}>
@@ -182,7 +222,7 @@ export default function ItemScreen() {
                   </Pressable>
                 ) : (
                   <T variant="italic" color={p.inkSoft}>
-                    Not shelved yet.
+                    No place yet.
                   </T>
                 )}
                 {item.tags.length > 0 && (
@@ -206,13 +246,13 @@ export default function ItemScreen() {
 
         {stamp && (
           <View key={stamp.key} style={styles.center}>
-            <Stamp text={stamp.text} sub={stamp.sub} color={stamp.color} />
+            <Stamp text={stamp.text} sub={stamp.sub} color={stamp.color} thud />
           </View>
         )}
 
         {loan ? (
           <View style={{ gap: 10 }}>
-            <LibraryButton label="It's back" tone="lamp" icon={(c) => <StampIcon size={20} color={c} />} onPress={markReturned} />
+            <LibraryButton label="Returned" tone="lamp" haptic={false} icon={(c) => <StampIcon size={20} color={c} />} onPress={markReturned} />
             <LibraryButton
               label="Change due date"
               tone="ghost"
@@ -221,7 +261,7 @@ export default function ItemScreen() {
           </View>
         ) : (
           <View style={{ gap: 12 }}>
-            <SectionLabel>Moved it? Tap its new shelf</SectionLabel>
+            <SectionLabel>Moved it? Tap where it is now</SectionLabel>
             {moveTargets.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 6 }}>
                 {moveTargets.map((l) => (
@@ -234,77 +274,74 @@ export default function ItemScreen() {
                 ))}
               </ScrollView>
             )}
-            <View style={styles.row}>
-              <LibraryButton
-                style={{ flex: 1 }}
-                label="Elsewhere"
-                tone="ghost"
-                icon={(c) => <ReshelveIcon size={20} color={c} />}
-                onPress={() => router.push({ pathname: '/move/[id]', params: { id: item.id } })}
-              />
-              <LibraryButton
-                style={{ flex: 1 }}
-                label="Lend it"
-                icon={(c) => <CheckedOutIcon size={20} color={c} />}
-                onPress={() => router.push({ pathname: '/lend/[id]', params: { id: item.id } })}
-              />
-            </View>
+            <LibraryButton
+              label="Move somewhere else"
+              icon={(c) => <ReshelveIcon size={20} color={c} />}
+              onPress={() => router.push({ pathname: '/move/[id]', params: { id: item.id } })}
+            />
+            <LibraryButton
+              label="Lend it"
+              tone="ghost"
+              icon={(c) => <CheckedOutIcon size={20} color={c} />}
+              onPress={() => router.push({ pathname: '/lend/[id]', params: { id: item.id } })}
+            />
           </View>
         )}
 
         <DateDueSlip history={history} />
-
-        <LibraryButton label="Withdraw from catalog" tone="ghost" icon={(c) => <BinIcon size={18} color={c} />} onPress={withdraw} />
       </ScrollView>
+      </KeyboardScreen>
     </Room>
   );
 }
 
+interface Draft {
+  name: string;
+  tags: string;
+  notes: string;
+  /** Tags the user took from the assistant. */
+  aiTags: string[];
+}
+
 const todayStamp = () => stampDate(Date.now());
 
-function Thumb({ id, tilt, onPress }: { id: string; tilt: number; onPress: () => void }) {
-  return <PhotoPlate base64={null} photoId={id} aspect={1} style={{ width: 84 }} tilt={tilt} onPress={onPress} />;
+function Thumb({ id, label, tilt, onPress }: { id: string; label: string; tilt: number; onPress: () => void }) {
+  return <PhotoPlate base64={null} photoId={id} aspect={1} style={{ width: 84 }} tilt={tilt} onPress={onPress} accessibilityLabel={label} />;
 }
 
 const showError = (e: unknown) =>
   Alert.alert("That didn't save", e instanceof Error ? e.message : String(e));
 
 function EditFields({
-  initial,
+  value: v,
+  onChange,
   photo,
-  onDone,
+  error,
 }: {
-  initial: { name: string; tags: string; notes: string };
+  value: Draft;
+  onChange: (next: Draft | ((cur: Draft | null) => Draft | null)) => void;
   /** Cover photo (base64 JPEG) for the assistant to look at. */
   photo: string | null;
-  onDone: (v: { name: string; tags: string; notes: string; aiTags: string[] }) => Promise<void>;
+  error: string | null;
 }) {
   const p = usePalette();
-  const [v, setV] = useState({ ...initial, aiTags: [] as string[] });
-  const [error, setError] = useState<string | null>(null);
   return (
     <View style={{ gap: 16 }}>
-      <TypedInput big value={v.name} onChangeText={(name) => setV({ ...v, name })} autoFocus accessibilityLabel="Name" />
-      <TypedInput label="Subjects (comma separated)" value={v.tags} onChangeText={(tags) => setV({ ...v, tags })} autoCapitalize="none" />
+      <TypedInput big value={v.name} onChangeText={(name) => onChange({ ...v, name })} autoFocus accessibilityLabel="Name" />
+      <TypedInput label="Tags (comma separated)" value={v.tags} onChangeText={(tags) => onChange({ ...v, tags })} autoCapitalize="none" />
       <SuggestSubjects
         name={v.name}
         notes={v.notes}
         photo={photo ? { base64: photo } : null}
         tags={v.tags}
-        onTag={(t) => setV((cur) => ({ ...cur, tags: withTag(cur.tags, t), aiTags: [...cur.aiTags, t] }))}
+        onTag={(t) => onChange((cur) => (cur ? { ...cur, tags: withTag(cur.tags, t), aiTags: [...cur.aiTags, t] } : cur))}
       />
-      <TypedInput label="Notes" value={v.notes} onChangeText={(notes) => setV({ ...v, notes })} multiline />
+      <TypedInput label="Notes" value={v.notes} onChangeText={(notes) => onChange({ ...v, notes })} multiline />
       {error && (
-        <T variant="small" color={p.stamp}>
+        <T variant="small" color={p.stamp} accessibilityLiveRegion="polite">
           {error}
         </T>
       )}
-      <LibraryButton
-        label="Save card"
-        tone="lamp"
-        compact
-        onPress={() => onDone(v).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))}
-      />
     </View>
   );
 }
@@ -316,7 +353,7 @@ function DateDueSlip({ history }: { history: HistoryEvent[] }) {
   return (
     <View style={[styles.slip, { backgroundColor: p.scheme === 'dark' ? '#2E2418' : '#F4E9C9', borderColor: p.cardEdge }]}>
       <T variant="label" style={{ textAlign: 'center', marginBottom: 6 }}>
-        Circulation record
+        History
       </T>
       {history.map((h) => (
         <View key={h.id} style={[styles.slipRow, { borderTopColor: p.rule }]}>
@@ -345,14 +382,14 @@ function describe(h: HistoryEvent): string {
     case 'returned':
       return `Returned by ${h.person}`;
     case 'moved':
-      if (!h.fromPath) return `Shelved at ${h.toPath ?? 'nowhere'}`;
-      return `Moved from ${h.fromPath.split(' › ').pop()} to ${h.toPath ?? 'no shelf'}`;
+      if (!h.fromPath) return `Put in ${h.toPath ?? 'no place'}`;
+      return `Moved from ${h.fromPath.split(' › ').pop()} to ${h.toPath ?? 'no place'}`;
   }
 }
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 22 },
+  cardTop: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', minHeight: 22, gap: 4 },
   pathWrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   pathPart: { flexDirection: 'row', alignItems: 'center' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

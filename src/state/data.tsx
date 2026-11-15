@@ -1,13 +1,27 @@
 import * as Crypto from 'expo-crypto';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { addView, decodeFingerprint, encodeFingerprint, FINGERPRINT_MODEL, type Fingerprint, type FingerprintView } from '../boxes/fingerprint';
+import { decodeFingerprint, type Fingerprint } from '../boxes/fingerprint';
 import { dumpCatalog, openArchive, restoreCatalog, sealArchive, type CatalogDump } from '../backup/archive';
 import { nativeAead, randomBytes, shareArchive } from '../backup/device';
 import { openEncryptedDatabase } from '../db/open';
 import { createRepo, type Repo } from '../db/repo';
 import type { BoxInfo, Db, Item, Location, PhotoInput } from '../db/types';
 import { buildLocationIndex, parsePathInput, type LocationIndex } from '../lib/locations';
+import { findPath, type PlaceValue } from '../lib/placeQuery';
+
+import { reuseItems } from './reuse';
+
+/** Creating a place that's already there. */
+export class PlaceExistsError extends Error {
+  constructor(
+    readonly id: string,
+    name: string,
+  ) {
+    super(`${name} already exists.`);
+    this.name = 'PlaceExistsError';
+  }
+}
 
 export interface Snapshot {
   items: Item[];
@@ -39,78 +53,102 @@ export const LAST_BACKUP_KEY = 'device.lastBackupAt';
 
 const DataContext = createContext<DataContextValue | null>(null);
 
-function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
+function makeActions(db: Db, repo: Repo, refresh: (parts?: readonly Part[]) => Promise<void>) {
   const run =
-    <A extends unknown[], R>(fn: (...args: A) => Promise<R>) =>
+    <A extends unknown[], R>(fn: (...args: A) => Promise<R>, parts?: readonly Part[]) =>
     async (...args: A): Promise<R> => {
       const result = await fn(...args);
-      await refresh();
+      await refresh(parts);
       return result;
     };
+  const ITEMS: readonly Part[] = ['items'];
+  const LOANS: readonly Part[] = ['items', 'people'];
+  const SETTINGS: readonly Part[] = ['settings'];
 
-  /** Resolves "Garage › Blue box" to a place id, creating what's missing. */
-  const placeFromPath = async (path: string): Promise<string | null> => {
-    const names = parsePathInput(path);
-    return names.length ? repo.ensureLocationPath(names) : null;
+  /** The id of a chosen place, creating it first if the user chose "Create new place". */
+  const resolvePlace = async (place: PlaceValue): Promise<string | null> => {
+    if (place.kind === 'existing') return place.id;
+    if (place.kind === 'new') return repo.ensureLocationPath(place.names, place.parentId);
+    return null;
   };
 
   return {
     addItem: run(
       (input: {
         name: string;
-        place: string;
+        place: PlaceValue;
         notes?: string;
         tags?: string[];
         lendTo?: { person: string; dueAt: number | null };
         photos?: PhotoInput[];
         aiTags?: string[];
-      }) => repo.addItem({ ...input, placeNames: parsePathInput(input.place) }),
+      }) => {
+        const { place, ...rest } = input;
+        return repo.addItem({
+          ...rest,
+          locationId: place.kind === 'existing' ? place.id : null,
+          placeNames: place.kind === 'new' ? place.names : undefined,
+          placeParentId: place.kind === 'new' ? place.parentId : null,
+        });
+      },
     ),
-    updateItem: run(repo.updateItem),
-    moveItem: run(async (id: string, place: string | { locationId: string | null }) => {
-      const locationId = typeof place === 'string' ? await placeFromPath(place) : place.locationId;
+    updateItem: run(repo.updateItem, ITEMS),
+    moveItem: run(async (id: string, place: PlaceValue | { locationId: string | null }) => {
+      const locationId = 'kind' in place ? await resolvePlace(place) : place.locationId;
       return repo.moveItem(id, locationId);
     }),
-    undoMove: run(repo.undoMove),
-    deleteItem: run(repo.deleteItem),
-    restoreItem: run(repo.restoreItem),
+    undoMove: run(repo.undoMove, ITEMS),
+    deleteItem: run(repo.deleteItem, ITEMS),
+    restoreItem: run(repo.restoreItem, ITEMS),
     addPhoto: run(repo.addPhoto),
     deletePhoto: run(repo.deletePhoto),
     getPhoto: repo.getPhoto,
-    lendItem: run(repo.lendItem),
-    returnItem: run(repo.returnItem),
-    undoReturn: run(repo.undoReturn),
-    setLoanDue: run(repo.setLoanDue),
-    addPlace: run(async (path: string, parentId: string | null = null) =>
-      repo.ensureLocationPath(parsePathInput(path), parentId),
-    ),
+    lendItem: run(repo.lendItem, LOANS),
+    returnItem: run(repo.returnItem, LOANS),
+    undoReturn: run(repo.undoReturn, LOANS),
+    undoLend: run(repo.undoLend, LOANS),
+    setLoanDue: run(repo.setLoanDue, LOANS),
+    /**
+     * Creates a place from a typed path below `parentId`. If the whole path
+     * already exists, throws PlaceExistsError carrying its id so the screen
+     * can say so and open it.
+     */
+    addPlace: run(async (path: string, parentId: string | null = null) => {
+      const names = parsePathInput(path);
+      if (names.length === 0) throw new Error('Type a place name.');
+      const index = buildLocationIndex(await repo.listLocations());
+      const existing = findPath(names.join(' > '), index, parentId);
+      if (existing) throw new PlaceExistsError(existing, index.byId.get(existing)!.name);
+      return repo.ensureLocationPath(names, parentId);
+    }),
     renamePlace: run(repo.renameLocation),
     setPlaceParent: run(repo.setLocationParent),
     deletePlace: run(repo.deleteLocation),
     itemHistory: repo.itemHistory,
     getSetting: repo.getSetting,
-    setSetting: run(repo.setSetting),
+    setSetting: run(repo.setSetting, SETTINGS),
 
-    /** Seals the whole catalog with `passphrase` and opens the share sheet. */
+    /**
+     * Seals the whole catalog with `passphrase` and opens the share sheet.
+     * Nothing is recorded yet: closing the sheet doesn't mean the file was
+     * saved. Call `recordBackup` once the user says it was.
+     */
     exportArchive: async (passphrase: string, onProgress?: (f: number) => void) => {
       const now = Date.now();
-      const bytes = await sealArchive(await dumpCatalog(db, now), passphrase, { aead: nativeAead, randomBytes, onProgress });
-      await shareArchive(bytes, now);
-      await repo.setSetting(LAST_BACKUP_KEY, String(now));
-      await refresh();
+      const bytes = await sealArchive(await repo.exclusive(() => dumpCatalog(db, now)), passphrase, { aead: nativeAead, randomBytes, onProgress });
+      const uri = await shareArchive(bytes, now);
+      return { uri, at: now };
     },
+    recordBackup: run((at: number) => repo.setSetting(LAST_BACKUP_KEY, String(at)), SETTINGS),
     openArchive: (bytes: Uint8Array, passphrase: string, onProgress?: (f: number) => void) =>
       openArchive(bytes, passphrase, { aead: nativeAead, randomBytes, onProgress }),
     /** Replaces everything with the archived catalog. */
-    restoreArchive: run((dump: CatalogDump) => restoreCatalog(db, dump)),
+    restoreArchive: run((dump: CatalogDump) => repo.exclusive(() => restoreCatalog(db, dump))),
 
     /** Adds a photo of a box (and what was read from it) to its fingerprint. */
-    addBoxView: run(async (locationId: string, view: FingerprintView, photo: PhotoInput) => {
-      const current = (await repo.listBoxes()).find((b) => b.locationId === locationId);
-      const fp = addView(decodeFingerprint(current?.fingerprint ?? null), view);
-      await repo.setFingerprint(locationId, encodeFingerprint(fp), FINGERPRINT_MODEL);
-      await repo.addPhoto({ locationId }, { ...photo, kind: view.words.length ? 'label' : 'box' });
-    }),
+    addBoxView: run(repo.addBoxView),
+    /** The id for a chosen place, creating it if the user chose "Create new place". */
+    ensurePlace: run(resolvePlace),
     clearBox: run(repo.clearBox),
 
     // Embeddings change nothing visible, so they don't refresh the snapshot.
@@ -122,16 +160,27 @@ function makeActions(db: Db, repo: Repo, refresh: () => Promise<void>) {
 
 export type Actions = ReturnType<typeof makeActions>;
 
-async function loadSnapshot(repo: Repo): Promise<Snapshot> {
+/** Which parts of the snapshot an action can change. */
+export type Part = 'items' | 'locations' | 'people' | 'settings' | 'boxes';
+const ALL: readonly Part[] = ['items', 'locations', 'people', 'settings', 'boxes'];
+
+async function loadSnapshot(repo: Repo, prev: Snapshot = EMPTY, parts: readonly Part[] = ALL): Promise<Snapshot> {
+  const want = new Set(parts);
   const [items, locations, people, settings, boxList] = await Promise.all([
-    repo.listItems(),
-    repo.listLocations(),
-    repo.knownPeople(),
-    repo.allSettings(),
-    repo.listBoxes(),
+    want.has('items') ? repo.listItems() : null,
+    want.has('locations') ? repo.listLocations() : null,
+    want.has('people') ? repo.knownPeople() : null,
+    want.has('settings') ? repo.allSettings() : null,
+    want.has('boxes') ? repo.listBoxes() : null,
   ]);
-  const boxes = new Map(boxList.map((b) => [b.locationId, { ...b, fp: decodeFingerprint(b.fingerprint) }]));
-  return { items, locations, index: buildLocationIndex(locations), people, settings, boxes };
+  return {
+    items: items ? reuseItems(prev.items, items) : prev.items,
+    locations: locations ?? prev.locations,
+    index: locations ? buildLocationIndex(locations) : prev.index,
+    people: people ?? prev.people,
+    settings: settings ?? prev.settings,
+    boxes: boxList ? new Map(boxList.map((b) => [b.locationId, { ...b, fp: decodeFingerprint(b.fingerprint) }])) : prev.boxes,
+  };
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -168,9 +217,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [attempt]);
 
-  const refresh = useCallback(async () => {
-    if (repo) setSnapshot(await loadSnapshot(repo));
-  }, [repo]);
+  const refresh = useCallback(
+    async (parts?: readonly Part[]) => {
+      if (!repo) return;
+      // Read the latest snapshot when the load finishes, not when it started.
+      const loaded = await loadSnapshot(repo, EMPTY, parts);
+      setSnapshot((prev) => ({
+        items: parts && !parts.includes('items') ? prev.items : reuseItems(prev.items, loaded.items),
+        locations: parts && !parts.includes('locations') ? prev.locations : loaded.locations,
+        index: parts && !parts.includes('locations') ? prev.index : loaded.index,
+        people: parts && !parts.includes('people') ? prev.people : loaded.people,
+        settings: parts && !parts.includes('settings') ? prev.settings : loaded.settings,
+        boxes: parts && !parts.includes('boxes') ? prev.boxes : loaded.boxes,
+      }));
+    },
+    [repo],
+  );
 
   const actions = useMemo(() => (store ? makeActions(store.db, store.repo, refresh) : null), [store, refresh]);
   const retry = useCallback(() => {

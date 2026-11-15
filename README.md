@@ -18,7 +18,7 @@ Clew is designed like an old library. Every thing gets a catalog card, places ar
 - **Voice.** Say "the passport is in the desk drawer" or "I lent the drill to Sam until Friday" and the card fills itself in; ask "where's my passport" from search. Recognition runs on the phone only (English for now). If the phone can't recognise speech offline, the mic says so instead of sending audio anywhere, and Android offers to download its offline speech model.
 - **Which box is this?** Photograph a box, or the label you scribbled on it, and Clew finds it among your boxes. It reads handwriting with the phone's built-in text recognition and compares colours and layout. No QR codes or printing. Each box keeps up to six views.
 - **Backups.** A full copy of the catalog (photos included) sealed with a passphrase (scrypt + AES-256-GCM), saved anywhere through the share sheet and restored on any phone. Backups are `.clew` files; `.wbk` backups from the Whereabouts days still restore.
-- **Library assistant (optional).** Download an open-weight vision model (SmolVLM2 500M, about 680 MB, or Qwen2.5-VL 3B, about 2.8 GB) and it suggests a name and subjects from a photo, as slips you tap to keep. It also adds "Might be what you mean" to search, using on-device text embeddings (nomic-embed-text v1.5). Runs entirely on the phone through llama.cpp.
+- **Library assistant (optional).** Download an open-weight vision model (SmolVLM2 500M, or SmolVLM2 2.2B on phones with 6 GB of memory or more; both Apache 2.0) and it suggests a name and subjects from a photo, as slips you tap to keep. It also adds "Might be what you mean" to search, using on-device text embeddings (nomic-embed-text v1.5). Runs entirely on the phone through llama.cpp.
 
 ## Privacy and security
 
@@ -43,6 +43,10 @@ npx expo run:ios       # or: npx expo run:android
 ```
 
 Or build in the cloud with EAS: `npx eas-cli@latest build --profile development`.
+
+`npm install` runs llama.rn's postinstall, which downloads its prebuilt native libraries from GitHub, so installs need network access to github.com. In an offline or locked-down CI, set `RNLLAMA_SKIP_POSTINSTALL=1` for steps that only run tests or lint; native builds need the download.
+
+Build profiles live in `eas.json`: `development` (dev client, internal), `preview` (internal; APK on Android) and `production`. Bump `ios.buildNumber` and `android.versionCode` in `app.json` for every store upload; `runtimeVersion` follows the app version.
 
 `npx expo start --web` serves a design preview in the browser with sample data. It is unencrypted, in-memory, and not a supported target. Camera, voice and OCR aren't available there, and the assistant is simulated (a pretend download and canned suggestions) so its screens can be reviewed.
 

@@ -1,7 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { initLlama, releaseAllLlama, type LlamaContext } from 'llama.rn';
 
-import { EMBED_MODEL, type ModelFile, type VisionModel } from './models';
+import { EMBED_MODEL, formatSize, modelFiles, type ModelFile, type VisionModel } from './models';
+import { sha256Stream } from './sha256';
 import { parseTagReply, TAG_SCHEMA, tagPrompt, type TagDraft } from './text';
 
 /**
@@ -16,54 +17,79 @@ const dir = () => new Directory(Paths.cache, 'models');
 const fileFor = (f: ModelFile) => new File(dir(), f.name);
 
 export function isInstalled(model: VisionModel): boolean {
-  return [model.model, model.mmproj, EMBED_MODEL].every((f) => fileFor(f).exists);
+  return modelFiles(model).every((f) => fileFor(f).exists);
 }
 
 export interface DownloadProgress {
   /** 0..1 over all files. */
   fraction: number;
   file: string;
+  /** Downloading, or checking a finished file against its SHA-256. */
+  phase: 'download' | 'check';
 }
 
 /** GGUF files start with these four bytes. */
 const GGUF = [0x47, 0x47, 0x55, 0x46];
 
-async function verify(file: File, expected: ModelFile): Promise<void> {
-  const size = file.size ?? 0;
+/** Keep this much free after the download so the phone stays usable. */
+const HEADROOM = 500 * 1000 ** 2;
+
+const broken = (f: ModelFile) => new Error(`${f.name} didn't download properly. Try again, on Wi-Fi if you can.`);
+
+async function verify(file: File, expected: ModelFile, onBytes: (n: number) => void): Promise<void> {
+  if ((file.size ?? 0) !== expected.bytes) throw broken(expected);
   const handle = file.open();
-  let head: Uint8Array;
   try {
-    head = handle.readBytesSync(4);
+    const head = handle.readBytesSync(4);
+    if (GGUF.some((b, i) => head[i] !== b)) throw broken(expected);
+    handle.offset = 0;
+    const digest = await sha256Stream((n) => handle.readBytes(n), onBytes);
+    if (digest !== expected.sha256) throw broken(expected);
   } finally {
     handle.close();
   }
-  if (GGUF.some((b, i) => head[i] !== b) || size < expected.approxBytes * 0.7) {
-    file.delete();
-    throw new Error(`${expected.name} didn't download properly. Try again on Wi-Fi.`);
-  }
+}
+
+/** Bytes still to fetch for this model (files already on the phone are skipped). */
+export function bytesToFetch(model: VisionModel): number {
+  return modelFiles(model).reduce((n, f) => (fileFor(f).exists ? n : n + f.bytes), 0);
 }
 
 export async function downloadModel(model: VisionModel, onProgress: (p: DownloadProgress) => void, signal?: AbortSignal) {
   const d = dir();
   if (!d.exists) d.create({ intermediates: true });
-  const files = [model.model, model.mmproj, EMBED_MODEL];
-  const total = files.reduce((n, f) => n + f.approxBytes, 0);
+  const needed = bytesToFetch(model);
+  const free = Paths.availableDiskSpace;
+  if (needed > 0 && typeof free === 'number' && free < needed + HEADROOM) {
+    throw new Error(`Not enough space. This needs ${formatSize(needed + HEADROOM)} free; the phone has ${formatSize(free)}.`);
+  }
+  const files = modelFiles(model);
+  // Each byte is counted twice: once downloading, once checking.
+  const total = files.reduce((n, f) => n + f.bytes, 0) * 2;
   let done = 0;
   for (const f of files) {
     const target = fileFor(f);
     if (!target.exists) {
       const partial = new File(d, `${f.name}.part`);
-      if (partial.exists) partial.delete();
-      await File.downloadFileAsync(f.url, partial, {
-        idempotent: true,
-        signal,
-        onProgress: ({ bytesWritten }) => onProgress({ fraction: Math.min(1, (done + bytesWritten) / total), file: f.name }),
-      });
-      await verify(partial, f);
-      partial.move(target);
+      try {
+        if (partial.exists) partial.delete();
+        await File.downloadFileAsync(f.url, partial, {
+          idempotent: true,
+          signal,
+          onProgress: ({ bytesWritten }) =>
+            onProgress({ fraction: Math.min(1, (done + bytesWritten) / total), file: f.name, phase: 'download' }),
+        });
+        if (signal?.aborted) throw new Error('Cancelled');
+        await verify(partial, f, (n) => onProgress({ fraction: Math.min(1, (done + f.bytes + n) / total), file: f.name, phase: 'check' }));
+        partial.move(target);
+      } catch (e) {
+        // A cancelled, failed or corrupt download never leaves a partial file behind.
+        if (partial.exists) partial.delete();
+        throw e;
+      }
     }
-    done += f.approxBytes;
-    onProgress({ fraction: Math.min(1, done / total), file: f.name });
+    done += f.bytes * 2;
+    onProgress({ fraction: Math.min(1, done / total), file: f.name, phase: 'download' });
   }
 }
 

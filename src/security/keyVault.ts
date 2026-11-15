@@ -61,7 +61,31 @@ export async function readKey(): Promise<string | null> {
   }
   // Null means the OS discarded the key (biometric enrolment changed).
   if (!key) throw new KeyLockedError(true);
+  // A plain copy must never outlive sealing; remove any left by an interrupted seal.
+  await removePlainKey().catch(() => {});
   return key;
+}
+
+/** Deletes the plain (unsealed) key copy, retrying a couple of times; resolves only once it's gone. */
+async function removePlainKey(): Promise<void> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await SecureStore.deleteItemAsync(PLAIN_KEY, OPTS);
+      if ((await SecureStore.getItemAsync(PLAIN_KEY, OPTS)) === null) return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError ?? new Error('The old key copy is still there.');
+}
+
+/** Sealing worked, but the plain key copy couldn't be removed yet. Clew retries on every launch. */
+export class SealIncompleteError extends Error {
+  constructor() {
+    super('Sealed. An old copy of the key couldn’t be removed yet; Clew removes it next time it opens.');
+    this.name = 'SealIncompleteError';
+  }
 }
 
 export async function newKey(): Promise<string> {
@@ -140,7 +164,11 @@ export async function sealKey(recoveryPassphrase: string): Promise<void> {
     throw new Error("The phone couldn't seal the key. Nothing was changed.");
   }
   await SecureStore.setItemAsync(MODE, 'sealed', OPTS);
-  await SecureStore.deleteItemAsync(PLAIN_KEY, OPTS);
+  try {
+    await removePlainKey();
+  } catch {
+    throw new SealIncompleteError();
+  }
 }
 
 /** Back to device mode. Asks for biometrics to release the key. */

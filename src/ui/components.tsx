@@ -1,8 +1,9 @@
-import * as Haptics from 'expo-haptics';
 import { forwardRef, useEffect, type ReactNode } from 'react';
 import {
   Animated,
   Easing,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { useAnimatedValue, useReducedMotion } from './animated';
 import { fonts, usePalette, type Palette } from './theme';
+import { haptic } from './haptics';
 
 /* ------------------------------------------------------------------ text */
 
@@ -26,7 +28,13 @@ type Variant = 'title' | 'heading' | 'body' | 'italic' | 'typed' | 'label' | 'sm
 
 export function T({ variant = 'body', style, color, ...rest }: TextProps & { variant?: Variant; color?: string }) {
   const p = usePalette();
-  return <Text {...rest} style={[textStyles[variant], { color: color ?? (variant === 'small' || variant === 'label' ? p.inkSoft : p.ink) }, style]} />;
+  return (
+    <Text
+      accessibilityRole={variant === 'title' ? 'header' : undefined}
+      {...rest}
+      style={[textStyles[variant], { color: color ?? (variant === 'small' || variant === 'label' ? p.inkSoft : p.ink) }, style]}
+    />
+  );
 }
 
 const textStyles = StyleSheet.create({
@@ -100,7 +108,7 @@ export function IndexCard({ children, style, punched = true, ruled = true, enter
   }, [enter, enterIndex, still]);
 
   const press = (to: number) =>
-    Animated.spring(lift, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+    still ? lift.setValue(0) : Animated.spring(lift, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
 
   const body = (
     <Animated.View
@@ -153,9 +161,12 @@ export function LibraryButton({
   style,
   compact,
   accessibilityLabel,
+  haptic: buzz = true,
 }: {
   label: string;
   accessibilityLabel?: string;
+  /** False when the action ends with its own success buzz (no double buzz). */
+  haptic?: boolean;
   onPress: () => void;
   tone?: ButtonTone;
   icon?: (color: string) => ReactNode;
@@ -165,7 +176,10 @@ export function LibraryButton({
 }) {
   const p = usePalette();
   const scale = useAnimatedValue(1);
+  const still = useReducedMotion();
   const { bg, fg, stitch } = buttonColors(p, tone);
+  const spring = (toValue: number, speed: number, bounciness?: number) =>
+    still ? undefined : Animated.spring(scale, { toValue, useNativeDriver: true, speed, bounciness }).start();
   return (
     <Pressable
       accessibilityRole="button"
@@ -173,11 +187,11 @@ export function LibraryButton({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={() => {
-        Haptics.selectionAsync().catch(() => {});
+        if (buzz) haptic.selection().catch(() => {});
         onPress();
       }}
-      onPressIn={() => Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start()}
-      onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30, bounciness: 8 }).start()}
+      onPressIn={() => spring(0.96, 50)}
+      onPressOut={() => spring(1, 30, 8)}
       style={style}
     >
       <Animated.View
@@ -236,16 +250,18 @@ export function SpineChip({
 }) {
   const p = usePalette();
   const pull = useAnimatedValue(selected ? 1 : 0);
+  const still = useReducedMotion();
   useEffect(() => {
-    Animated.spring(pull, { toValue: selected ? 1 : 0, useNativeDriver: true, bounciness: 10 }).start();
-  }, [pull, selected]);
+    if (still) pull.setValue(selected ? 1 : 0);
+    else Animated.spring(pull, { toValue: selected ? 1 : 0, useNativeDriver: true, bounciness: 10 }).start();
+  }, [pull, selected, still]);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={hint ? `${label}, in ${hint}` : label}
       accessibilityState={{ selected }}
       onPress={() => {
-        Haptics.selectionAsync().catch(() => {});
+        haptic.selection().catch(() => {});
         onPress();
       }}
     >
@@ -258,11 +274,11 @@ export function SpineChip({
       >
         <View style={[styles.spineBand, { backgroundColor: p.brass }]} />
         <View style={[styles.spineLabel, { backgroundColor: p.scheme === 'dark' ? '#EADFC8' : '#F8F1DF' }]}>
-          <Text numberOfLines={1} style={styles.spineText}>
+          <Text numberOfLines={2} style={styles.spineText}>
             {label}
           </Text>
           {hint ? (
-            <Text numberOfLines={1} style={styles.spineHint}>
+            <Text numberOfLines={2} style={styles.spineHint}>
               {hint}
             </Text>
           ) : null}
@@ -285,12 +301,15 @@ export function Stamp({
   color,
   angle = -7,
   animate = true,
+  thud = false,
 }: {
   text: string;
   sub?: string;
   color: string;
   angle?: number;
   animate?: boolean;
+  /** A heavy buzz as it lands: only for stamps that answer a user action, not decoration. */
+  thud?: boolean;
 }) {
   const still = useReducedMotion();
   const v = useAnimatedValue(animate && !still ? 0 : 1);
@@ -299,16 +318,17 @@ export function Stamp({
     if (still) {
       // Keep the haptic thud, skip the slam-down.
       v.setValue(1);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      if (thud) haptic.impact('heavy').catch(() => {});
       return;
     }
     Animated.sequence([
       Animated.timing(v, { toValue: 0.85, duration: 140, easing: Easing.in(Easing.quad), useNativeDriver: true }),
       Animated.spring(v, { toValue: 1, useNativeDriver: true, speed: 30, bounciness: 14 }),
     ]).start();
-    const t = setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}), 140);
+    if (!thud) return;
+    const t = setTimeout(() => haptic.impact('heavy').catch(() => {}), 140);
     return () => clearTimeout(t);
-  }, [animate, v, still]);
+  }, [animate, v, still, thud]);
   return (
     <Animated.View
       accessibilityLabel={sub ? `${text}, ${sub}` : text}
@@ -334,6 +354,18 @@ export function Stamp({
 
 /* ----------------------------------------------------------------- input */
 
+/**
+ * Keeps focused inputs and the buttons under them above the keyboard. Android
+ * draws edge-to-edge (SDK 58), so it needs an explicit behaviour too.
+ */
+export function KeyboardScreen({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return (
+    <KeyboardAvoidingView style={[{ flex: 1 }, style]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 export const TypedInput = forwardRef<TextInputInstance, TextInputProps & { label?: string; big?: boolean }>(
   function TypedInput({ label, big, style, ...rest }, ref) {
     const p = usePalette();
@@ -346,6 +378,7 @@ export const TypedInput = forwardRef<TextInputInstance, TextInputProps & { label
           selectionColor={p.leather}
           cursorColor={p.leather}
           autoCorrect={false}
+          accessibilityLabel={label}
           {...rest}
           style={[
             big ? styles.inputBig : styles.input,
@@ -419,12 +452,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
-  buttonCompact: { minHeight: 40, paddingHorizontal: 14 },
+  buttonCompact: { minHeight: 44, paddingHorizontal: 14 },
   stitch: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, margin: 4, borderRadius: 4, borderWidth: 1, borderStyle: 'dashed' },
   buttonLabel: { fontFamily: fonts.display, fontSize: 17, letterSpacing: 0.3 },
   spine: {
     width: 100,
-    height: 112,
+    minHeight: 112,
     borderRadius: 3,
     paddingVertical: 10,
     paddingHorizontal: 8,

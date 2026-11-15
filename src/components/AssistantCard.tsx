@@ -1,8 +1,10 @@
+import * as Device from 'expo-device';
+import * as Network from 'expo-network';
 import type { ReactNode } from 'react';
 import { Alert, Platform, StyleSheet, View } from 'react-native';
 
 import { useAssistant } from '@/ai/assistant';
-import { formatSize, totalBytes, VISION_MODELS, type VisionModel } from '@/ai/models';
+import { formatSize, modelsForMemory, totalBytes, VISION_MODELS, type VisionModel } from '@/ai/models';
 import { IndexCard, LibraryButton, T } from '@/ui/components';
 import { OwlIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
@@ -19,27 +21,41 @@ export function AssistantCard() {
   const ask = Platform.OS === 'web' ? (_t: string, _m: string, buttons: { onPress?: () => void }[]) => buttons[1]?.onPress?.() : Alert.alert;
 
   const confirmRemove = () =>
-    ask('Remove the assistant?', 'The model files are deleted from this phone. Your cards and subjects stay as they are.', [
+    ask('Remove the assistant?', 'The model files are deleted from this phone. Your things and tags stay as they are.', [
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => remove() },
     ]);
 
-  const confirmDownload = (m: VisionModel) =>
+  // Only the tiers this phone has the memory to run.
+  const offered = modelsForMemory(VISION_MODELS, Device.totalMemory);
+
+  const confirmDownload = async (m: VisionModel) => {
+    const net = await Network.getNetworkStateAsync().catch(() => null);
+    const cellular = net?.type === Network.NetworkStateType.CELLULAR;
+    const size = formatSize(totalBytes(m));
     ask(
-      `Download ${m.title}?`,
-      `${formatSize(totalBytes(m))} from Hugging Face. Use Wi-Fi if you can. Nothing from your catalog is sent: the files only come down.`,
+      cellular ? `You're on mobile data` : `Download ${m.title}?`,
+      cellular
+        ? `${m.title} is ${size} and may count against your data plan. Wi-Fi is better if you can wait. Nothing from your catalog is sent: the files only come down.`
+        : `${size} from Hugging Face. Nothing from your catalog is sent: the files only come down.`,
       [
         { text: 'Not now', style: 'cancel' },
-        { text: 'Download', onPress: () => download(m.id) },
+        { text: cellular ? 'Download anyway' : 'Download', onPress: () => download(m.id) },
       ],
     );
+  };
 
   let body: ReactNode;
   switch (status.state) {
     case 'off':
       body = (
         <View style={{ gap: 12 }}>
-          {VISION_MODELS.map((m) => (
+          {offered.length === 0 && (
+            <T variant="small" color={p.inkSoft}>
+              This phone doesn’t have enough memory to run the assistant. Everything else in Clew works without it.
+            </T>
+          )}
+          {offered.map((m) => (
             <View key={m.id} style={[styles.option, { borderTopColor: p.rule }]}>
               <View style={{ flex: 1, gap: 2 }}>
                 <T variant="body">
@@ -65,7 +81,8 @@ export function AssistantCard() {
             <View style={[styles.fill, { width: `${Math.max(2, fraction * 100)}%`, backgroundColor: p.lamp }]} />
           </View>
           <T variant="small">
-            Fetching {status.model.title}… {Math.round(fraction * 100)}% of {formatSize(totalBytes(status.model))}. Keep the app open.
+            {status.progress?.phase === 'check' ? 'Checking the files' : `Fetching ${status.model.title}`}… {Math.round(fraction * 100)}% of{' '}
+            {formatSize(totalBytes(status.model))}. Keep the app open.
           </T>
           <LibraryButton compact tone="ghost" label="Cancel" onPress={cancel} />
         </View>
@@ -76,7 +93,7 @@ export function AssistantCard() {
       body = (
         <View style={{ gap: 10 }}>
           <T variant="small">
-            {status.model.title} is on this phone ({formatSize(totalBytes(status.model))}). Look for “Suggest subjects” on new cards, and
+            {status.model.title} is on this phone ({formatSize(totalBytes(status.model))}). Look for “Suggest tags” on new cards, and
             “Might be what you mean” in search.
           </T>
           <LibraryButton compact tone="ghost" label="Remove assistant" onPress={confirmRemove} />
@@ -121,7 +138,7 @@ export function AssistantCard() {
           <View style={{ flex: 1, gap: 2 }}>
             <T variant="heading">Library assistant</T>
             <T variant="small">
-              Optional. An open model that runs on this phone suggests names and subjects from a photo, and finds things by description.
+              Optional. An open model that runs on this phone suggests names and tags from a photo, and finds things by description.
             </T>
           </View>
         </View>

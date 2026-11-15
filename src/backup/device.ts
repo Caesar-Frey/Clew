@@ -1,9 +1,11 @@
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
-import { ARCHIVE_EXTENSION, type Aead } from './archive';
+import { deleteQuietly } from '../photos/tempFiles';
+
+import { ARCHIVE_EXTENSION, MAX_BACKUP_BYTES, type Aead } from './archive';
 
 /** AES-256-GCM from the platform crypto library (fast for photo-heavy archives). */
 export const nativeAead: Aead = {
@@ -27,28 +29,36 @@ function fileName(now: number): string {
   return `Clew ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.${ARCHIVE_EXTENSION}`;
 }
 
+/** Shared backups wait here until the user confirms they saved them (swept on start). */
+export const SHARE_DIR = 'clew-share';
+
 /**
- * Hands the sealed archive to the share sheet (Save to Files, Drive, AirDrop,
- * email...). The temporary copy is removed afterwards.
+ * Writes the sealed archive to a private folder and opens the share sheet
+ * (Save to Files, Drive, AirDrop, email...). The file is kept, because on
+ * Android the receiving app may still be reading it after the sheet closes;
+ * call `discardShared` when leaving the screen.
  */
-export async function shareArchive(bytes: Uint8Array, now: number): Promise<void> {
-  const file = new File(Paths.cache, fileName(now));
+export async function shareArchive(bytes: Uint8Array, now: number): Promise<string> {
+  const dir = new Directory(Paths.cache, SHARE_DIR);
+  if (!dir.exists) dir.create({ intermediates: true });
+  const file = new File(dir, fileName(now));
   if (file.exists) file.delete();
   file.create();
   await file.write(bytes);
-  try {
-    await Sharing.shareAsync(file.uri, {
-      mimeType: 'application/octet-stream',
-      UTI: 'public.data',
-      dialogTitle: 'Save your Clew backup',
-    });
-  } finally {
-    try {
-      file.delete();
-    } catch {
-      // The OS cleans the cache directory eventually.
-    }
-  }
+  await shareAgain(file.uri);
+  return file.uri;
+}
+
+export async function shareAgain(uri: string): Promise<void> {
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/octet-stream',
+    UTI: 'public.data',
+    dialogTitle: 'Save your Clew backup',
+  });
+}
+
+export function discardShared(uri: string | null): void {
+  deleteQuietly(uri);
 }
 
 /** Lets the user choose an archive. Returns null if they cancel. */
@@ -58,7 +68,7 @@ export async function pickArchive(): Promise<{ name: string; bytes: Uint8Array }
   const asset = result.assets[0];
   const file = new File(asset.uri);
   try {
-    if ((file.size ?? 0) > 512 * 1024 * 1024) throw new Error('That file is too large to be a Clew backup.');
+    if ((file.size ?? 0) > 2 * MAX_BACKUP_BYTES) throw new Error('That file is too large to be a Clew backup.');
     return { name: asset.name, bytes: await file.bytes() };
   } finally {
     try {

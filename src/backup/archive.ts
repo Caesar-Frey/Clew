@@ -35,15 +35,21 @@ export const BACKUP_TABLES = ['locations', 'items', 'tags', 'item_tags', 'photos
 /** Settings that describe this phone, not the catalog, and must not travel. */
 const DEVICE_SETTINGS = /^device\./;
 
-export const MIN_PASSPHRASE_LENGTH = 8;
+export const MIN_PASSPHRASE_LENGTH = 10;
+/** Or this many separate words, which is long enough and easy to remember. */
+export const MIN_PASSPHRASE_WORDS = 3;
 
 export interface KdfParams {
   N: number;
   r: number;
   p: number;
 }
-/** scrypt at 32 MiB: a few seconds on a phone, expensive to brute-force. */
+/** scrypt at 32 MiB: a few seconds on a phone. Used for the on-phone recovery passphrase. */
 export const DEFAULT_KDF: KdfParams = { N: 2 ** 15, r: 8, p: 1 };
+/** Backups travel off the phone, so they get a costlier 128 MiB scrypt. Older files used DEFAULT_KDF and still open. */
+export const BACKUP_KDF: KdfParams = { N: 2 ** 17, r: 8, p: 1 };
+/** The most a file may ask for: anything above is refused rather than allowed to hang or crash the phone. */
+const MAX_KDF: KdfParams = { N: 2 ** 17, r: 8, p: 1 };
 
 /** AES-256-GCM, provided natively on the phone and by a JS library in tests. */
 export interface Aead {
@@ -110,8 +116,27 @@ export function fromHex(hex: string): Uint8Array {
 
 /* ----------------------------------------------------------------- dump */
 
+/**
+ * The whole archive is built in memory (JSON, then encrypted), which peaks at
+ * about four times its size. Above this, stop with a clear message instead of
+ * letting the phone kill the app. Streaming the archive would lift the limit.
+ */
+export const MAX_BACKUP_BYTES = 150 * 1024 * 1024;
+
+export class BackupTooLargeError extends Error {
+  constructor(readonly bytes: number) {
+    const mb = (n: number) => Math.round(n / (1024 * 1024));
+    super(
+      `This catalog is too large to back up in one file yet: its photos take ${mb(bytes)} MB and the limit is ${mb(MAX_BACKUP_BYTES)} MB. Removing some photos will let the backup go through.`,
+    );
+    this.name = 'BackupTooLargeError';
+  }
+}
+
 /** Reads the whole catalog into plain JSON-safe rows. */
-export async function dumpCatalog(db: Db, now: number): Promise<CatalogDump> {
+export async function dumpCatalog(db: Db, now: number, maxBytes = MAX_BACKUP_BYTES): Promise<CatalogDump> {
+  const size = await db.getFirstAsync<{ bytes: number | null }>('SELECT sum(length(data)) + sum(ifnull(length(thumb), 0)) AS bytes FROM photos');
+  if ((size?.bytes ?? 0) > maxBytes) throw new BackupTooLargeError(size?.bytes ?? 0);
   const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const tables: Record<string, Row[]> = {};
   for (const table of BACKUP_TABLES) {
@@ -141,6 +166,7 @@ export async function restoreCatalog(db: Db, dump: CatalogDump): Promise<void> {
     const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
     columns.set(table, new Set(info.map((c) => c.name)));
   }
+  const locations = reRootBrokenPlaces(dump.tables.locations ?? []);
   await db.withTransactionAsync(async () => {
     // Locations point at their parents, so check foreign keys at commit.
     await db.execAsync('PRAGMA defer_foreign_keys = ON;');
@@ -150,7 +176,7 @@ export async function restoreCatalog(db: Db, dump: CatalogDump): Promise<void> {
     }
     for (const table of BACKUP_TABLES) {
       const known = columns.get(table)!;
-      for (const row of dump.tables[table] ?? []) {
+      for (const row of table === 'locations' ? locations : (dump.tables[table] ?? [])) {
         if (table === 'settings' && DEVICE_SETTINGS.test(String(row.key))) continue;
         const cols = Object.keys(row).filter((c) => known.has(c));
         if (cols.length === 0) continue;
@@ -162,6 +188,33 @@ export async function restoreCatalog(db: Db, dump: CatalogDump): Promise<void> {
       }
     }
   });
+}
+
+/**
+ * A damaged or hostile file could make places their own ancestors (A inside
+ * B inside A) or point at places that aren't there. Such places are moved to
+ * the top level instead, so the restored catalog is always a proper tree.
+ */
+export function reRootBrokenPlaces(rows: Row[]): Row[] {
+  const parentOf = new Map<string, string | null>();
+  for (const r of rows) parentOf.set(String(r.id), typeof r.parent_id === 'string' ? r.parent_id : null);
+  for (const [id, parent] of parentOf) {
+    if (parent !== null && !parentOf.has(parent)) parentOf.set(id, null);
+  }
+  for (const start of parentOf.keys()) {
+    const seen = new Set<string>();
+    let cur: string | null = start;
+    while (cur !== null) {
+      if (seen.has(cur)) {
+        // `cur` closes the loop: cut it loose.
+        parentOf.set(cur, null);
+        break;
+      }
+      seen.add(cur);
+      cur = parentOf.get(cur) ?? null;
+    }
+  }
+  return rows.map((r) => (parentOf.get(String(r.id)) === (r.parent_id ?? null) ? r : { ...r, parent_id: parentOf.get(String(r.id)) ?? null }));
 }
 
 function decodeValue(v: Row[string] | undefined): SqlValue {
@@ -230,15 +283,31 @@ async function deriveKey(passphrase: string, salt: Uint8Array, kdf: KdfParams, o
   return scryptAsync(passphrase.normalize('NFKC'), salt, { ...kdf, dkLen: 32, onProgress, asyncTick: 25 });
 }
 
+const words = (p: string) => p.trim().split(/[\s\-_.,]+/).filter((w) => w.length >= 2);
+
 export function checkPassphrase(passphrase: string): string | null {
-  if (passphrase.length < MIN_PASSPHRASE_LENGTH) return `Use at least ${MIN_PASSPHRASE_LENGTH} characters.`;
+  if (passphrase.length < MIN_PASSPHRASE_LENGTH && words(passphrase).length < MIN_PASSPHRASE_WORDS) {
+    return `Use at least ${MIN_PASSPHRASE_LENGTH} characters, or ${MIN_PASSPHRASE_WORDS} words.`;
+  }
   return null;
+}
+
+export type Strength = 'too short' | 'fair' | 'good' | 'strong';
+
+/** A rough guide shown while typing: more words and more length are what matter. */
+export function passphraseStrength(passphrase: string): Strength {
+  if (checkPassphrase(passphrase)) return 'too short';
+  const n = words(passphrase).length;
+  const unique = new Set(passphrase.toLowerCase()).size;
+  if (n >= 4 || (passphrase.length >= 20 && unique >= 10)) return 'strong';
+  if (n >= 3 || (passphrase.length >= 14 && unique >= 8)) return 'good';
+  return 'fair';
 }
 
 export async function sealArchive(dump: CatalogDump, passphrase: string, deps: ArchiveDeps): Promise<Uint8Array> {
   const problem = checkPassphrase(passphrase);
   if (problem) throw new Error(problem);
-  const kdf = deps.kdf ?? DEFAULT_KDF;
+  const kdf = deps.kdf ?? BACKUP_KDF;
   const salt = await deps.randomBytes(16);
   const nonce = await deps.randomBytes(12);
   const header: Header = {
@@ -284,12 +353,13 @@ function parsePrefix(file: Uint8Array): { header: Header; prefix: Uint8Array; bo
   const sane =
     HEADER_APPS.includes(header?.app) &&
     header.kdf === 'scrypt' &&
-    // Refuse absurd costs a crafted file could use to hang the phone.
-    Number.isInteger(header.N) && header.N >= 2 ** 10 && header.N <= 2 ** 20 &&
-    Number.isInteger(header.r) && header.r >= 1 && header.r <= 16 &&
-    Number.isInteger(header.p) && header.p >= 1 && header.p <= 4 &&
-    typeof header.salt === 'string' &&
-    typeof header.nonce === 'string';
+    // Refuse costs a crafted file could use to hang the phone or run it out of memory.
+    Number.isInteger(header.N) && header.N >= 2 ** 10 && header.N <= MAX_KDF.N && (header.N & (header.N - 1)) === 0 &&
+    Number.isInteger(header.r) && header.r >= 1 && header.r <= MAX_KDF.r &&
+    Number.isInteger(header.p) && header.p >= 1 && header.p <= MAX_KDF.p &&
+    // 16-64 byte salt, 12 byte GCM nonce, as lower-case hex.
+    typeof header.salt === 'string' && /^(?:[0-9a-f]{2}){16,64}$/.test(header.salt) &&
+    typeof header.nonce === 'string' && /^[0-9a-f]{24}$/.test(header.nonce);
   if (!sane) throw new NotAnArchiveError();
   return { header, prefix: file.subarray(0, 9 + len), body: file.subarray(9 + len) };
 }

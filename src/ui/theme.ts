@@ -35,20 +35,22 @@ export interface Palette {
   brassDark: string;
   stamp: string;
   stampReturned: string;
+  /** Background of the highlighted (Return-picks-this) suggestion row. */
+  highlight: string;
   shadow: string;
 }
 
-const light: Palette = {
+export const light: Palette = {
   scheme: 'light',
   room: '#EFE4CC',
   grain: 'rgba(122, 90, 52, 0.05)',
   card: '#FBF6EA',
   cardEdge: '#E3D6BA',
   rule: 'rgba(86, 128, 170, 0.20)',
-  headRule: '#B04A40',
+  headRule: '#A2433A',
   ink: '#2A1F17',
   inkSoft: '#6B5843',
-  inkFaint: '#7E6A54',
+  inkFaint: '#72604C',
   leather: '#6E2620',
   leatherDeep: '#4F1915',
   leatherText: '#6E2620',
@@ -62,10 +64,11 @@ const light: Palette = {
   brassDark: '#7C5D2C',
   stamp: '#B23A31',
   stampReturned: '#3D6B52',
+  highlight: '#E4ECE2',
   shadow: '#3B2A1A',
 };
 
-const dark: Palette = {
+export const dark: Palette = {
   scheme: 'dark',
   room: '#17110D',
   grain: 'rgba(226, 197, 142, 0.03)',
@@ -89,6 +92,7 @@ const dark: Palette = {
   brassDark: '#8A6935',
   stamp: '#E37468',
   stampReturned: '#6FA584',
+  highlight: '#22332A',
   shadow: '#000000',
 };
 

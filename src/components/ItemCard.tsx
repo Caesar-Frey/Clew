@@ -4,16 +4,24 @@ import { Image, StyleSheet, View } from 'react-native';
 
 import type { Item } from '@/db/types';
 import { callNumber, dueState, shortDate } from '@/lib/format';
+import { PATH_SEPARATOR } from '@/lib/locations';
 import { jpegUri } from '@/photos/capture';
-import { useData } from '@/state/data';
 import { IndexCard, T } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
 
 /** A thing, as its catalog card. */
-export const ItemCard = memo(function ItemCard({ item, enterIndex }: { item: Item; enterIndex?: number }) {
+export const ItemCard = memo(function ItemCard({
+  item,
+  place,
+  enterIndex,
+}: {
+  item: Item;
+  /** `index.pathString(item.locationId)`; a string so memo can compare it. */
+  place: string;
+  enterIndex?: number;
+}) {
   const p = usePalette();
-  const { index } = useData();
-  const path = index.pathNames(item.locationId);
+  const path = place ? place.split(PATH_SEPARATOR) : [];
   const loan = item.activeLoan;
   const due = loan ? dueState(loan.dueAt) : 'none';
   return (
@@ -50,7 +58,7 @@ export const ItemCard = memo(function ItemCard({ item, enterIndex }: { item: Ite
         </T>
       ) : (
         <T variant="typed" color={path.length ? p.inkSoft : p.inkFaint} numberOfLines={2} style={item.cover ? { marginRight: 64 } : null}>
-          {path.length ? index.pathString(item.locationId) : 'Not shelved yet'}
+          {place || 'No place yet'}
         </T>
       )}
       {item.tags.length > 0 && (
@@ -63,7 +71,7 @@ export const ItemCard = memo(function ItemCard({ item, enterIndex }: { item: Ite
 });
 
 const styles = StyleSheet.create({
-  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 22, marginBottom: 6 },
+  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 22, marginBottom: 6 },
   callNo: { letterSpacing: 1.5, flexShrink: 1 },
   out: { borderWidth: 1.5, borderRadius: 3, paddingHorizontal: 6, paddingVertical: 1, transform: [{ rotate: '-4deg' }] },
   title: { marginBottom: 2 },

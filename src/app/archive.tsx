@@ -1,15 +1,16 @@
-import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { checkPassphrase, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
-import { pickArchive } from '@/backup/device';
-import { shortDate, stampDate } from '@/lib/format';
+import { checkPassphrase, passphraseStrength, peekArchive, type ArchiveSummary, type CatalogDump } from '@/backup/archive';
+import { discardShared, pickArchive, shareAgain } from '@/backup/device';
+import { replaceSummary, shortDate, stampDate } from '@/lib/format';
 import { useData } from '@/state/data';
-import { IndexCard, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
+import { IndexCard, KeyboardScreen, LibraryButton, Room, Stamp, T, TypedInput } from '@/ui/components';
 import { usePalette } from '@/ui/theme';
+import { useDiscardGuard } from '@/ui/useDiscardGuard';
+import { haptic } from '@/ui/haptics';
 
 /** Make an encrypted backup, or restore one (`?mode=restore`). */
 export default function ArchiveScreen() {
@@ -19,11 +20,11 @@ export default function ArchiveScreen() {
   return (
     <Room>
       <Stack.Screen options={{ title: restoring ? 'Restore a backup' : 'Make a backup' }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardScreen>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 18 }}>
           {restoring ? <RestoreFlow /> : <BackupFlow />}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardScreen>
     </Room>
   );
 }
@@ -41,17 +42,29 @@ function BackupFlow() {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
+  /** Sealed and handed to the share sheet; waiting for "did you save it?". */
+  const [shared, setShared] = useState<{ uri: string; at: number } | null>(null);
+  const [notYet, setNotYet] = useState(false);
+
+  // The shared file stays until the user leaves or makes another (the
+  // receiving app may still be reading it), and is swept on next start anyway.
+  const sharedUri = shared?.uri ?? null;
+  useEffect(() => () => discardShared(sharedUri), [sharedUri]);
 
   const problem = checkPassphrase(pass) ?? (again && again !== pass ? "The two passphrases don't match." : null);
   const ready = !problem && again === pass && progress === null;
+  const { leave } = useDiscardGuard(!!(pass || again) && progress === null, 'Stop making the backup?');
 
   const seal = async () => {
+    if (!ready) {
+      if (progress === null) setError(problem ?? (again !== pass ? "The two passphrases don't match." : 'Type the passphrase twice.'));
+      return;
+    }
     setError(null);
     setProgress(0);
     try {
-      await actions.exportArchive(pass, setProgress);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setDone(Date.now());
+      setShared(await actions.exportArchive(pass, setProgress));
+      setNotYet(false);
       setPass('');
       setAgain('');
     } catch (e) {
@@ -61,6 +74,45 @@ function BackupFlow() {
     }
   };
 
+  const confirmSaved = async () => {
+    if (!shared) return;
+    try {
+      await actions.recordBackup(shared.at);
+      haptic.success().catch(() => {});
+      setDone(shared.at);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  if (shared && done === null) {
+    return (
+      <View style={styles.doneBox}>
+        <T variant="heading" style={{ textAlign: 'center' }} accessibilityRole="header">
+          Did you save the backup file?
+        </T>
+        <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
+          {notYet
+            ? 'No problem. Share it again and choose Files, a cloud drive or a computer.'
+            : 'Closing the share sheet doesn’t save it. Only say yes if the file went somewhere other than this phone.'}
+        </T>
+        {error && (
+          <T variant="typed" color={p.stamp} accessibilityLiveRegion="polite">
+            {error}
+          </T>
+        )}
+        <View style={{ gap: 12, alignSelf: 'stretch' }}>
+          <LibraryButton label="Yes, it's saved" tone="lamp" haptic={false} onPress={confirmSaved} />
+          {notYet ? (
+            <LibraryButton label="Share it again" tone="ghost" onPress={() => shareAgain(shared.uri).catch((e: unknown) => setError(errorText(e)))} />
+          ) : (
+            <LibraryButton label="Not yet" tone="ghost" onPress={() => setNotYet(true)} />
+          )}
+        </View>
+      </View>
+    );
+  }
+
   if (done !== null) {
     return (
       <View style={styles.doneBox}>
@@ -68,7 +120,7 @@ function BackupFlow() {
         <T variant="italic" color={p.inkSoft} style={{ textAlign: 'center' }}>
           Keep the file somewhere other than this phone, and keep the passphrase somewhere safe too. You need both to restore.
         </T>
-        <LibraryButton label="Done" tone="lamp" onPress={() => router.back()} />
+        <LibraryButton label="Done" tone="lamp" onPress={leave} />
       </View>
     );
   }
@@ -96,7 +148,7 @@ function BackupFlow() {
       <PassphraseField label="Passphrase" value={pass} onChange={setPass} show={show} onToggle={() => setShow((s) => !s)} />
       <PassphraseField label="Same again" value={again} onChange={setAgain} show={show} onSubmit={() => ready && seal()} />
       <T variant="small" color={pass && problem ? p.stamp : p.inkSoft}>
-        {pass && problem ? problem : 'Tip: a few unrelated words make a strong passphrase that is easy to remember.'}
+        {pass && problem ? problem : `${pass ? `Strength: ${passphraseStrength(pass)}. ` : ''}Tip: a few unrelated words make a strong passphrase that is easy to remember.`}
       </T>
       {error && (
         <T variant="typed" color={p.stamp} accessibilityLiveRegion="polite">
@@ -104,8 +156,8 @@ function BackupFlow() {
         </T>
       )}
       <LibraryButton
-        label={progress === null ? 'Seal and save' : `Sealing… ${Math.round(progress * 100)}%`}
-        disabled={!ready}
+        label={progress === null ? 'Encrypt and save backup' : `Encrypting… ${Math.round(progress * 100)}%`}
+        disabled={progress !== null}
         onPress={seal}
       />
     </>
@@ -116,13 +168,14 @@ type Picked = { name: string; bytes: Uint8Array; createdAt: number; summary: Arc
 
 function RestoreFlow() {
   const p = usePalette();
-  const { actions, items } = useData();
+  const { actions, items, locations, boxes } = useData();
   const [picked, setPicked] = useState<Picked | null>(null);
   const [pass, setPass] = useState('');
   const [show, setShow] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<CatalogDump | null>(null);
+  useDiscardGuard(!!pass && !done && progress === null, 'Stop restoring?');
 
   const choose = async () => {
     setError(null);
@@ -139,7 +192,7 @@ function RestoreFlow() {
   const replace = async (dump: CatalogDump) => {
     try {
       await actions.restoreArchive(dump);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success().catch(() => {});
       setDone(dump);
     } catch (e) {
       setError(`Nothing was changed. ${errorText(e)}`);
@@ -148,6 +201,10 @@ function RestoreFlow() {
 
   const open = async () => {
     if (!picked) return;
+    if (!pass) {
+      setError('Enter the passphrase this backup was made with.');
+      return;
+    }
     setError(null);
     setProgress(0);
     let dump: CatalogDump;
@@ -159,10 +216,10 @@ function RestoreFlow() {
     } finally {
       setProgress(null);
     }
-    if (items.length === 0) return replace(dump);
+    if (items.length === 0 && locations.length === 0 && boxes.size === 0) return replace(dump);
     Alert.alert(
       'Replace this catalog?',
-      `The ${items.length} ${items.length === 1 ? 'thing' : 'things'} on this phone will be replaced by the backup. This can't be undone.`,
+      `${replaceSummary(items.length, locations.length)} on this phone will be replaced by the backup. This can't be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Replace', style: 'destructive', onPress: () => replace(dump) },
@@ -217,7 +274,8 @@ function RestoreFlow() {
           <LibraryButton
             label={progress === null ? 'Open and restore' : `Opening… ${Math.round(progress * 100)}%`}
             tone="lamp"
-            disabled={!pass || progress !== null}
+            disabled={progress !== null}
+            haptic={false}
             onPress={open}
           />
         </>

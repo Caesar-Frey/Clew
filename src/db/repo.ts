@@ -1,4 +1,15 @@
+import {
+  addViewDropping,
+  decodeFingerprint,
+  encodeFingerprint,
+  FINGERPRINT_MODEL,
+  MAX_VIEWS,
+  type FingerprintView,
+} from '../boxes/fingerprint';
 import { buildLocationIndex, PATH_SEPARATOR } from '../lib/locations';
+import { normalize } from '../search/fuzzy';
+
+import { createMutex, serializeAll } from './mutex';
 import type { BoxInfo, Db, HistoryEvent, Item, Loan, Location, Photo, PhotoInput, SqlValue } from './types';
 
 /** Everything needed to put a deleted item back. */
@@ -91,6 +102,7 @@ export type Repo = ReturnType<typeof createRepo>;
 
 export function createRepo(db: Db, deps: RepoDeps) {
   const { now, uuid } = deps;
+  const mutex = createMutex();
 
   async function listLocations(): Promise<Location[]> {
     const rows = await db.getAllAsync<LocationRow>('SELECT * FROM locations');
@@ -119,15 +131,25 @@ export function createRepo(db: Db, deps: RepoDeps) {
    * Finds or creates each place along `names` (root first) and returns the
    * deepest one. `parentId` lets the path start below an existing place.
    */
+  /**
+   * A place under `parentId` whose name matches `name` once folded the way
+   * search folds it (SQLite NOCASE only knows ASCII: "Łazienka" vs "łazienka").
+   */
+  async function findSibling(parentId: string | null, name: string, excludeId?: string): Promise<{ id: string } | null> {
+    const want = normalize(name);
+    const rows = await db.getAllAsync<{ id: string; name: string }>(
+      `SELECT id, name FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '')`,
+      [parentId],
+    );
+    return rows.find((r) => r.id !== excludeId && normalize(r.name) === want) ?? null;
+  }
+
   async function ensureLocationPath(names: string[], parentId: string | null = null): Promise<string> {
     if (names.length === 0) throw new Error('Where is it? Add a place');
     let parent = parentId;
     for (const raw of names) {
       const name = cleanName(raw, 'Place');
-      const existing = await db.getFirstAsync<{ id: string }>(
-        `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE`,
-        [parent, name],
-      );
+      const existing = await findSibling(parent, name);
       if (existing) {
         parent = existing.id;
         continue;
@@ -145,29 +167,29 @@ export function createRepo(db: Db, deps: RepoDeps) {
 
   async function renameLocation(id: string, name: string): Promise<void> {
     const clean = cleanName(name, 'Place');
-    const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
-    if (!loc) throw new Error('That place no longer exists');
-    const clash = await db.getFirstAsync<{ id: string }>(
-      `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
-      [loc.parent_id, clean, id],
-    );
-    if (clash) throw new Error(`There's already a place called "${clean}" here`);
-    await db.runAsync('UPDATE locations SET name = ? WHERE id = ?', [clean, id]);
+    await db.withTransactionAsync(async () => {
+      const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
+      if (!loc) throw new Error('That place no longer exists');
+      const clash = await findSibling(loc.parent_id, clean, id);
+      if (clash) throw new Error(`There's already a place called "${clean}" here`);
+      await db.runAsync('UPDATE locations SET name = ? WHERE id = ?', [clean, id]);
+      await markPlaceEmbeddingsStale(id);
+    });
   }
 
   async function setLocationParent(id: string, parentId: string | null): Promise<void> {
-    if (parentId) {
-      const index = buildLocationIndex(await listLocations());
-      if (index.isWithin(parentId, id)) throw new Error("A place can't go inside itself");
-    }
-    const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
-    if (!loc) throw new Error('That place no longer exists');
-    const clash = await db.getFirstAsync<{ id: string }>(
-      `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
-      [parentId, loc.name, id],
-    );
-    if (clash) throw new Error(`There's already a place called "${loc.name}" there`);
-    await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [parentId, id]);
+    await db.withTransactionAsync(async () => {
+      if (parentId) {
+        const index = buildLocationIndex(await listLocations());
+        if (index.isWithin(parentId, id)) throw new Error("A place can't go inside itself");
+      }
+      const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
+      if (!loc) throw new Error('That place no longer exists');
+      const clash = await findSibling(parentId, loc.name, id);
+      if (clash) throw new Error(`There's already a place called "${loc.name}" there`);
+      await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [parentId, id]);
+      await markPlaceEmbeddingsStale(id);
+    });
   }
 
   /**
@@ -177,9 +199,13 @@ export function createRepo(db: Db, deps: RepoDeps) {
   async function deleteLocation(id: string): Promise<void> {
     const loc = await db.getFirstAsync<LocationRow>('SELECT * FROM locations WHERE id = ?', [id]);
     if (!loc) return;
-    const fromPath = await pathString(id);
-    const toPath = await pathString(loc.parent_id);
+    const before = buildLocationIndex(await listLocations());
+    const pathBefore = (x: string) => (before.byId.has(x) ? before.pathString(x) : null);
+    const fromPath = pathBefore(id);
+    const toPath = loc.parent_id ? pathBefore(loc.parent_id) : null;
     await db.withTransactionAsync(async () => {
+      // Everything nested moves up a level, so its paths change.
+      await markPlaceEmbeddingsStale(id);
       const items = await db.getAllAsync<{ id: string }>('SELECT id FROM items WHERE location_id = ?', [id]);
       const t = now();
       for (const item of items) {
@@ -201,12 +227,9 @@ export function createRepo(db: Db, deps: RepoDeps) {
       // deleted place gets merged into that sibling.
       const children = await db.getAllAsync<LocationRow>('SELECT * FROM locations WHERE parent_id = ?', [id]);
       for (const child of children) {
-        const clash = await db.getFirstAsync<{ id: string }>(
-          `SELECT id FROM locations WHERE ifnull(parent_id, '') = ifnull(?, '') AND name = ? COLLATE NOCASE AND id != ?`,
-          [loc.parent_id, child.name, child.id],
-        );
+        const clash = await findSibling(loc.parent_id, child.name, child.id);
         if (clash) {
-          await mergeInto(child.id, clash.id);
+          await mergeInto(child.id, clash.id, pathBefore);
         } else {
           await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [loc.parent_id, child.id]);
         }
@@ -215,18 +238,65 @@ export function createRepo(db: Db, deps: RepoDeps) {
     });
   }
 
-  async function mergeInto(sourceId: string, targetId: string): Promise<void> {
-    await db.runAsync('UPDATE items SET location_id = ? WHERE location_id = ?', [targetId, sourceId]);
+  /**
+   * Merges one place into another: its things (with a history entry each),
+   * its nested places, and its box photos and fingerprint views, keeping the
+   * newest views up to the cap. `pathOf` gives paths as they were before the
+   * delete started, for the history.
+   */
+  async function mergeInto(sourceId: string, targetId: string, pathOf: (id: string) => string | null): Promise<void> {
+    const t = now();
+    await markPlaceEmbeddingsStale(sourceId);
+    const items = await db.getAllAsync<{ id: string }>('SELECT id FROM items WHERE location_id = ?', [sourceId]);
+    for (const item of items) {
+      await db.runAsync(
+        `INSERT INTO moves (id, item_id, from_location_id, to_location_id, from_path, to_path, moved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [uuid(), item.id, sourceId, targetId, pathOf(sourceId), pathOf(targetId), t],
+      );
+    }
+    await db.runAsync('UPDATE items SET location_id = ?, updated_at = ? WHERE location_id = ?', [targetId, t, sourceId]);
+    await mergeBoxes(sourceId, targetId);
     const children = await db.getAllAsync<LocationRow>('SELECT * FROM locations WHERE parent_id = ?', [sourceId]);
     for (const child of children) {
-      const clash = await db.getFirstAsync<{ id: string }>(
-        `SELECT id FROM locations WHERE parent_id = ? AND name = ? COLLATE NOCASE`,
-        [targetId, child.name],
-      );
-      if (clash) await mergeInto(child.id, clash.id);
+      const clash = await findSibling(targetId, child.name);
+      if (clash) await mergeInto(child.id, clash.id, pathOf);
       else await db.runAsync('UPDATE locations SET parent_id = ? WHERE id = ?', [targetId, child.id]);
     }
     await db.runAsync('DELETE FROM locations WHERE id = ?', [sourceId]);
+  }
+
+  /** Moves box photos and fingerprint views from one place to another (before the source is deleted). */
+  async function mergeBoxes(sourceId: string, targetId: string): Promise<void> {
+    const rows = await db.getAllAsync<{ id: string; fingerprint: Uint8Array | null }>(
+      'SELECT id, fingerprint FROM locations WHERE id IN (?, ?)',
+      [sourceId, targetId],
+    );
+    const fpOf = (id: string) => {
+      const raw = rows.find((r) => r.id === id)?.fingerprint;
+      return decodeFingerprint(raw ? new Uint8Array(raw) : null);
+    };
+    const source = fpOf(sourceId);
+    await db.runAsync('UPDATE photos SET location_id = ? WHERE location_id = ?', [targetId, sourceId]);
+    if (!source?.views.length) return;
+    const target = fpOf(targetId);
+    // Newest first by their photo's date; views saved without a photo id count as oldest.
+    const photos = await db.getAllAsync<{ id: string; created_at: number }>('SELECT id, created_at FROM photos WHERE location_id = ?', [
+      targetId,
+    ]);
+    const when = new Map(photos.map((p) => [p.id, p.created_at]));
+    const all = [...(target?.views ?? []), ...source.views];
+    const ordered = all
+      .map((v, i) => ({ v, at: (v.photoId && when.get(v.photoId)) || 0, i }))
+      .sort((a, b) => a.at - b.at || a.i - b.i)
+      .map((x) => x.v);
+    const kept = ordered.slice(-MAX_VIEWS);
+    for (const v of ordered.slice(0, -MAX_VIEWS)) if (v.photoId) await db.runAsync('DELETE FROM photos WHERE id = ?', [v.photoId]);
+    await db.runAsync('UPDATE locations SET fingerprint = ?, fingerprint_model = ? WHERE id = ?', [
+      encodeFingerprint({ v: 1, views: kept }),
+      FINGERPRINT_MODEL,
+      targetId,
+    ]);
   }
 
   /**
@@ -277,11 +347,29 @@ export function createRepo(db: Db, deps: RepoDeps) {
     return rows.map((r) => r.id);
   }
 
-  async function setEmbedding(itemId: string, embedding: Uint8Array, model: string): Promise<void> {
-    // Stamped with the item's own updated_at so a later edit marks it stale.
+  /**
+   * Stores an embedding, stamped with the `updated_at` the text was read at
+   * (`embeddedAt`), so an edit made while the model was working still marks
+   * it stale.
+   */
+  async function setEmbedding(itemId: string, embedding: Uint8Array, model: string, embeddedAt: number): Promise<void> {
+    await db.runAsync('UPDATE items SET embedding = ?, embedding_model = ?, embedding_updated_at = ? WHERE id = ?', [
+      embedding,
+      model,
+      embeddedAt,
+      itemId,
+    ]);
+  }
+
+  /**
+   * An item's embedded text includes its place path, so renaming or moving a
+   * place makes the embeddings of everything inside it (at any depth) stale.
+   */
+  async function markPlaceEmbeddingsStale(locationId: string): Promise<void> {
     await db.runAsync(
-      'UPDATE items SET embedding = ?, embedding_model = ?, embedding_updated_at = updated_at WHERE id = ?',
-      [embedding, model, itemId],
+      `WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT l.id FROM locations l JOIN sub ON l.parent_id = sub.id)
+       UPDATE items SET embedding_updated_at = 0 WHERE embedding IS NOT NULL AND location_id IN (SELECT id FROM sub)`,
+      [locationId],
     );
   }
 
@@ -294,8 +382,9 @@ export function createRepo(db: Db, deps: RepoDeps) {
     name: string;
     /** An existing place, or */
     locationId?: string | null;
-    /** a path to find or create, root first. */
+    /** a path to find or create, starting below `placeParentId` (or the root). */
     placeNames?: string[];
+    placeParentId?: string | null;
     notes?: string | null;
     tags?: string[];
     /** Subjects suggested by the assistant and approved. */
@@ -310,7 +399,7 @@ export function createRepo(db: Db, deps: RepoDeps) {
     const t = now();
     await db.withTransactionAsync(async () => {
       const locationId = input.placeNames?.length
-        ? await ensureLocationPath(input.placeNames)
+        ? await ensureLocationPath(input.placeNames, input.placeParentId ?? null)
         : (input.locationId ?? null);
       const toPath = await pathString(locationId);
       await db.runAsync(
@@ -551,9 +640,22 @@ export function createRepo(db: Db, deps: RepoDeps) {
     );
   }
 
+  /** Takes back a loan made by mistake (only while it's still open). */
+  async function undoLend(loanId: string): Promise<void> {
+    await db.withTransactionAsync(async () => {
+      const loan = await db.getFirstAsync<LoanRow>('SELECT * FROM loans WHERE id = ? AND returned_at IS NULL', [loanId]);
+      if (!loan) return;
+      await db.runAsync('DELETE FROM loans WHERE id = ?', [loanId]);
+      await db.runAsync('UPDATE items SET updated_at = ? WHERE id = ?', [now(), loan.item_id]);
+    });
+  }
+
   async function setLoanDue(loanId: string, dueAt: number | null): Promise<void> {
     await db.runAsync('UPDATE loans SET due_at = ? WHERE id = ?', [dueAt, loanId]);
   }
+
+  /** Cover thumbnails by photo id (immutable per id). */
+  let coverCache = new Map<string, string | null>();
 
   async function listItems(): Promise<Item[]> {
     const [items, tags, loans, photos] = await Promise.all([
@@ -562,16 +664,30 @@ export function createRepo(db: Db, deps: RepoDeps) {
         'SELECT it.item_id, t.name FROM item_tags it JOIN tags t ON t.id = it.tag_id ORDER BY t.name',
       ),
       db.getAllAsync<LoanRow>('SELECT * FROM loans WHERE returned_at IS NULL'),
-      db.getAllAsync<{ id: string; item_id: string; thumb: string | null }>(
-        'SELECT id, item_id, thumb FROM photos WHERE item_id IS NOT NULL ORDER BY created_at, id',
-      ),
+      db.getAllAsync<{ id: string; item_id: string }>('SELECT id, item_id FROM photos WHERE item_id IS NOT NULL ORDER BY created_at, id'),
     ]);
     const photosByItem = new Map<string, { ids: string[]; cover: string | null }>();
     for (const ph of photos) {
-      const entry = photosByItem.get(ph.item_id) ?? { ids: [], cover: ph.thumb };
+      const entry = photosByItem.get(ph.item_id) ?? { ids: [], cover: null };
       entry.ids.push(ph.id);
       photosByItem.set(ph.item_id, entry);
     }
+    // Only cover thumbnails are needed, and a photo's thumbnail never changes,
+    // so fetch just the covers this cache hasn't seen.
+    const coverIds = [...photosByItem.values()].map((e) => e.ids[0]!);
+    const missing = coverIds.filter((id) => !coverCache.has(id));
+    for (let i = 0; i < missing.length; i += 500) {
+      const chunk = missing.slice(i, i + 500);
+      const rows = await db.getAllAsync<{ id: string; thumb: string | null }>(
+        `SELECT id, thumb FROM photos WHERE id IN (${chunk.map(() => '?').join(',')})`,
+        chunk,
+      );
+      for (const r of rows) coverCache.set(r.id, r.thumb);
+    }
+    const keep = new Map<string, string | null>();
+    for (const id of coverIds) keep.set(id, coverCache.get(id) ?? null);
+    coverCache = keep;
+    for (const e of photosByItem.values()) e.cover = coverCache.get(e.ids[0]!) ?? null;
     const tagsByItem = new Map<string, string[]>();
     for (const t of tags) {
       const list = tagsByItem.get(t.item_id) ?? [];
@@ -667,6 +783,42 @@ export function createRepo(db: Db, deps: RepoDeps) {
     await db.runAsync('UPDATE locations SET fingerprint = ?, fingerprint_model = ? WHERE id = ?', [fingerprint, model, locationId]);
   }
 
+  /**
+   * Adds a photo of a box and its fingerprint view in one transaction. When
+   * the view cap pushes an old view out, that view's photo goes with it, and
+   * the place never keeps more box photos than views.
+   */
+  async function addBoxView(locationId: string, view: FingerprintView, photo: PhotoInput): Promise<string> {
+    const t = now();
+    let photoId = '';
+    await db.withTransactionAsync(async () => {
+      const row = await db.getFirstAsync<{ fingerprint: Uint8Array | null }>('SELECT fingerprint FROM locations WHERE id = ?', [locationId]);
+      if (!row) throw new Error('That place no longer exists');
+      photoId = await insertPhoto({ locationId }, { ...photo, kind: view.words.length ? 'label' : 'box' }, t);
+      const current = decodeFingerprint(row.fingerprint ? new Uint8Array(row.fingerprint) : null);
+      const { fingerprint, dropped } = addViewDropping(current, { ...view, photoId });
+      await db.runAsync('UPDATE locations SET fingerprint = ?, fingerprint_model = ? WHERE id = ?', [
+        encodeFingerprint(fingerprint),
+        FINGERPRINT_MODEL,
+        locationId,
+      ]);
+      for (const v of dropped) if (v.photoId) await db.runAsync('DELETE FROM photos WHERE id = ? AND location_id = ?', [v.photoId, locationId]);
+      // Older views were saved without a photo id: trim the oldest unreferenced photos.
+      const kept = new Set(fingerprint.views.map((v) => v.photoId).filter(Boolean));
+      const photos = await db.getAllAsync<{ id: string }>(
+        'SELECT id FROM photos WHERE location_id = ? ORDER BY created_at DESC, id DESC',
+        [locationId],
+      );
+      let room = MAX_VIEWS - kept.size;
+      for (const ph of photos) {
+        if (kept.has(ph.id)) continue;
+        if (room > 0) room--;
+        else await db.runAsync('DELETE FROM photos WHERE id = ?', [ph.id]);
+      }
+    });
+    return photoId;
+  }
+
   /** Forgets how to recognise a place: its fingerprint and its own photos. */
   async function clearBox(locationId: string): Promise<void> {
     await db.withTransactionAsync(async () => {
@@ -680,37 +832,50 @@ export function createRepo(db: Db, deps: RepoDeps) {
     return Object.fromEntries(rows.map((r) => [r.key, r.value]));
   }
 
+  const api = serializeAll(
+    {
+      allSettings,
+      listBoxes,
+      setFingerprint,
+      addBoxView,
+      listEmbeddings,
+      staleEmbeddings,
+      setEmbedding,
+      clearBox,
+      listLocations,
+      ensureLocationPath,
+      renameLocation,
+      setLocationParent,
+      deleteLocation,
+      addItem,
+      updateItem,
+      moveItem,
+      undoMove,
+      deleteItem,
+      restoreItem,
+      addPhoto,
+      getPhoto,
+      deletePhoto,
+      lendItem,
+      returnItem,
+      undoReturn,
+      undoLend,
+      setLoanDue,
+      listItems,
+      itemHistory,
+      knownPeople,
+      getSetting,
+      setSetting,
+    },
+    mutex,
+  );
   return {
-    allSettings,
-    listBoxes,
-    setFingerprint,
-    listEmbeddings,
-    staleEmbeddings,
-    setEmbedding,
-    clearBox,
-    listLocations,
-    ensureLocationPath,
-    renameLocation,
-    setLocationParent,
-    deleteLocation,
-    addItem,
-    updateItem,
-    moveItem,
-    undoMove,
-    deleteItem,
-    restoreItem,
-    addPhoto,
-    getPhoto,
-    deletePhoto,
-    lendItem,
-    returnItem,
-    undoReturn,
-    setLoanDue,
-    listItems,
-    itemHistory,
-    knownPeople,
-    getSetting,
-    setSetting,
+    ...api,
+    /**
+     * Runs other database work (backup, restore) with the same one-at-a-time
+     * rule as every repo call.
+     */
+    exclusive: <T>(task: () => Promise<T>) => mutex.run(task),
   };
 }
 

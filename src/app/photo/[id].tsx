@@ -1,7 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Alert, Image, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBackOrHome } from '@/lib/nav';
 import { useFullPhoto } from '@/components/PhotoPlate';
 import { jpegUri } from '@/photos/capture';
 import { useData } from '@/state/data';
@@ -22,7 +23,7 @@ export default function PhotoScreen() {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          router.back();
+          goBackOrHome();
           await actions.deletePhoto(id!).catch(() => {});
         },
       },

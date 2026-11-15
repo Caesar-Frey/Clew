@@ -20,6 +20,8 @@ export interface FingerprintView {
   hist: number[];
   /** 4×4 grid of mean RGB (0..1), row-major. */
   grid: number[];
+  /** The stored photo this view came from, so it can be removed with the view. */
+  photoId?: string;
 }
 
 export interface Fingerprint {
@@ -37,7 +39,12 @@ const VAL_BINS = 3;
 const GRAY_BINS = 4;
 const HIST_SIZE = HUE_BINS * SAT_BINS * VAL_BINS + GRAY_BINS;
 
-/** Visual features from RGBA pixels (e.g. a 48×48 thumbnail). */
+/**
+ * Visual features from RGBA pixels (e.g. a 48×48 thumbnail, centre-cropped to
+ * a square). Each pixel's colour is spread over its two nearest hue and value
+ * bins (triangular soft-binning), so a box shot under slightly different
+ * light doesn't jump to a different bin and stop matching.
+ */
 export function visualFeatures(rgba: Uint8Array, width: number, height: number): Pick<FingerprintView, 'hist' | 'grid'> {
   const hist = new Array<number>(HIST_SIZE).fill(0);
   const grid = new Array<number>(48).fill(0);
@@ -52,7 +59,7 @@ export function visualFeatures(rgba: Uint8Array, width: number, height: number):
       const cx = (x + 0.5) / width - 0.5;
       const cy = (y + 0.5) / height - 0.5;
       const w = 1.5 - Math.min(1, Math.sqrt(cx * cx + cy * cy) * 2);
-      hist[histBin(r, g, b)]! += w;
+      addSoft(hist, r, g, b, w);
       const cell = Math.min(3, Math.floor((y / height) * 4)) * 4 + Math.min(3, Math.floor((x / width) * 4));
       grid[cell * 3]! += r;
       grid[cell * 3 + 1]! += g;
@@ -67,22 +74,53 @@ export function visualFeatures(rgba: Uint8Array, width: number, height: number):
   };
 }
 
-function histBin(r: number, g: number, b: number): number {
+/** Splits a continuous bin position between its two nearest bins. */
+function spread(pos: number, bins: number, wrap: boolean): [number, number, number, number] {
+  const centre = pos * bins - 0.5;
+  let lo = Math.floor(centre);
+  const frac = centre - lo;
+  let hi = lo + 1;
+  if (wrap) {
+    lo = (lo + bins) % bins;
+    hi = hi % bins;
+  } else {
+    lo = Math.max(0, Math.min(bins - 1, lo));
+    hi = Math.max(0, Math.min(bins - 1, hi));
+  }
+  return [lo, 1 - frac, hi, frac];
+}
+
+function addSoft(hist: number[], r: number, g: number, b: number, weight: number): void {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const v = max;
   const s = max === 0 ? 0 : (max - min) / max;
   // Greys, black and white: hue is meaningless, bin by brightness only.
-  if (s < 0.18 || v < 0.12) return HUE_BINS * SAT_BINS * VAL_BINS + Math.min(GRAY_BINS - 1, Math.floor(v * GRAY_BINS));
+  if (s < 0.18 || v < 0.12) {
+    const [lo, wl, hi, wh] = spread(v, GRAY_BINS, false);
+    hist[HUE_BINS * SAT_BINS * VAL_BINS + lo]! += weight * wl;
+    hist[HUE_BINS * SAT_BINS * VAL_BINS + hi]! += weight * wh;
+    return;
+  }
   let h: number;
   const d = max - min;
   if (max === r) h = ((g - b) / d + 6) % 6;
   else if (max === g) h = (b - r) / d + 2;
   else h = (r - g) / d + 4;
-  const hb = Math.min(HUE_BINS - 1, Math.floor((h / 6) * HUE_BINS));
   const sb = Math.min(SAT_BINS - 1, Math.floor(((s - 0.18) / 0.82) * SAT_BINS));
-  const vb = Math.min(VAL_BINS - 1, Math.floor(((v - 0.12) / 0.88) * VAL_BINS));
-  return (hb * SAT_BINS + sb) * VAL_BINS + vb;
+  const [h0, wh0, h1, wh1] = spread(h / 6, HUE_BINS, true);
+  const [v0, wv0, v1, wv1] = spread((v - 0.12) / 0.88, VAL_BINS, false);
+  const bin = (hb: number, vb: number) => (hb * SAT_BINS + sb) * VAL_BINS + vb;
+  hist[bin(h0, v0)]! += weight * wh0 * wv0;
+  hist[bin(h0, v1)]! += weight * wh0 * wv1;
+  hist[bin(h1, v0)]! += weight * wh1 * wv0;
+  hist[bin(h1, v1)]! += weight * wh1 * wv1;
+}
+
+/** Largest centred square, as [x, y, size], for cropping before the 4×4 grid. */
+export function centreSquare(width: number, height: number): [number, number, number] {
+  const size = Math.min(width, height);
+  return [Math.floor((width - size) / 2), Math.floor((height - size) / 2), size];
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
@@ -104,16 +142,46 @@ export function labelText(lines: string[]): string {
 
 /* ----------------------------------------------------------- similarity */
 
+/**
+ * Words printed on lots of cartons. They say little about which box this is,
+ * so they count for a fifth of a handwritten word and never prove a match.
+ */
+const GENERIC_WORDS = new Set(
+  (
+    'fragile handle with care this side up way top bottom open here keep dry heavy box boxes carton cartons ' +
+    'amazon prime ikea ups fedex dhl usps royal mail parcel post shipping ship deliver delivery packing package ' +
+    'packaged made in china recycle recyclable cardboard corrugated contents qty quantity weight kg lbs net gross ' +
+    'small medium large xl the and for of to'
+  ).split(' '),
+);
+
+export const isGenericWord = (w: string) => GENERIC_WORDS.has(w);
+
+const wordWeight = (w: string) => (isGenericWord(w) ? 0.2 : 1);
+
+function bestToken(w: string, candidate: string[]): number {
+  let best = 0;
+  for (const c of candidate) best = Math.max(best, scoreToken(w, c), scoreToken(c, w));
+  return best;
+}
+
 export function textSimilarity(query: string[], candidate: string[]): number {
   const q = query.filter((w) => w.length >= 3);
   if (q.length === 0 || candidate.length === 0) return 0;
   let total = 0;
+  let weights = 0;
   for (const w of q) {
-    let best = 0;
-    for (const c of candidate) best = Math.max(best, scoreToken(w, c), scoreToken(c, w));
-    total += best;
+    const weight = wordWeight(w);
+    total += weight * bestToken(w, candidate);
+    weights += weight;
   }
-  return Math.min(1, total / q.length);
+  return Math.min(1, total / weights);
+}
+
+/** Distinctive (non-generic) words the two photos share, allowing for misreads. */
+export function sharedWords(query: string[], candidate: string[]): number {
+  return query.filter((w) => w.length >= 3 && !isGenericWord(w) && bestToken(w, candidate.filter((c) => !isGenericWord(c))) >= 0.55)
+    .length;
 }
 
 /** Histogram intersection, 0..1. */
@@ -130,41 +198,69 @@ export function gridSimilarity(a: number[], b: number[]): number {
   return Math.max(0, 1 - (d / a.length) * 2.5);
 }
 
-export function viewSimilarity(query: FingerprintView, view: FingerprintView): number {
+export interface ViewScore {
+  score: number;
+  /** Look alone, 0..1. */
+  visual: number;
+  /** Distinctive words both photos show. */
+  shared: number;
+}
+
+export function compareViews(query: FingerprintView, view: FingerprintView): ViewScore {
   const visual = 0.75 * histSimilarity(query.hist, view.hist) + 0.25 * gridSimilarity(query.grid, view.grid);
   const queryHasText = query.words.some((w) => w.length >= 3);
+  const shared = sharedWords(query.words, view.words);
   // A label in the new photo that this view never showed: could be the box
   // from another side, but less likely.
-  if (queryHasText && view.words.length === 0) return 0.85 * visual;
-  if (!queryHasText) return visual;
+  if (queryHasText && view.words.length === 0) return { score: 0.85 * visual, visual, shared };
+  if (!queryHasText) return { score: visual, visual, shared };
   const text = textSimilarity(query.words, view.words);
   // Matching handwriting is strong evidence; different writing is strong
   // evidence against.
-  return 0.6 * text + 0.4 * visual;
+  return { score: 0.6 * text + 0.4 * visual, visual, shared };
 }
 
-export interface BoxMatch<T> {
+export function viewSimilarity(query: FingerprintView, view: FingerprintView): number {
+  return compareViews(query, view).score;
+}
+
+export interface BoxMatch<T> extends ViewScore {
   value: T;
-  score: number;
 }
 
 /** Best-first matches for a new photo among fingerprinted boxes. */
 export function rankBoxes<T>(query: FingerprintView, boxes: { value: T; fingerprint: Fingerprint }[]): BoxMatch<T>[] {
   return boxes
-    .map(({ value, fingerprint }) => ({
-      value,
-      score: Math.max(0, ...fingerprint.views.map((v) => viewSimilarity(query, v))),
-    }))
+    .map(({ value, fingerprint }) => {
+      let best: ViewScore = { score: 0, visual: 0, shared: 0 };
+      for (const v of fingerprint.views) {
+        const s = compareViews(query, v);
+        if (s.score > best.score) best = s;
+      }
+      return { value, ...best };
+    })
     .sort((a, b) => b.score - a.score);
 }
 
 export type MatchStrength = 'strong' | 'possible' | 'weak';
 
+/** How far ahead of the runner-up the top box must be to be called likely. */
+export const STRONG_MARGIN = 0.06;
+
+/**
+ * Only the top candidate can be "strong", and only when it is clearly ahead
+ * of the next one AND either a distinctive word matches or the look is very
+ * close. Colour alone never makes a strong match with a lookalike nearby.
+ * Even a strong match is shown for the user to confirm.
+ */
 export function matchStrength(matches: BoxMatch<unknown>[], i = 0): MatchStrength {
   const m = matches[i];
   if (!m) return 'weak';
-  const next = matches[i + 1]?.score ?? 0;
-  if (m.score >= 0.62 && (i > 0 || m.score - next >= 0.06)) return 'strong';
+  if (i === 0) {
+    const next = matches[1]?.score ?? 0;
+    const evidence = m.shared >= 1 || m.visual >= 0.8;
+    if (m.score >= 0.62 && m.score - next >= STRONG_MARGIN && evidence) return 'strong';
+  }
   if (m.score >= 0.45) return 'possible';
   return 'weak';
 }
@@ -189,8 +285,14 @@ export function decodeFingerprint(bytes: Uint8Array | null): Fingerprint | null 
 }
 
 export function addView(fp: Fingerprint | null, view: FingerprintView): Fingerprint {
+  return addViewDropping(fp, view).fingerprint;
+}
+
+/** Adds a view, keeping the newest MAX_VIEWS; also returns the views that fell off. */
+export function addViewDropping(fp: Fingerprint | null, view: FingerprintView): { fingerprint: Fingerprint; dropped: FingerprintView[] } {
   const views = [...(fp?.views ?? []), view];
-  return { v: 1, views: views.slice(-MAX_VIEWS) };
+  const cut = Math.max(0, views.length - MAX_VIEWS);
+  return { fingerprint: { v: 1, views: views.slice(cut) }, dropped: views.slice(0, cut) };
 }
 
 /** All words on a box's labels, for text search ("camping" finds the box marked CAMPING). */

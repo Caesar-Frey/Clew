@@ -1,8 +1,7 @@
-import { File, Paths } from 'expo-file-system';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
-import { base64ToBytes } from '../lib/base64';
+import { withTempJpeg } from '../photos/tempFiles';
 import { useData } from '../state/data';
 import { downloadModel, draftTags, embed, isInstalled, release, removeModels, type DownloadProgress } from './engine';
 import { EMBED_MODEL, VISION_MODELS, type VisionModel } from './models';
@@ -89,56 +88,56 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setTransient(null);
   }, [actions]);
 
-  // Free model memory whenever the app leaves the foreground.
+  // Free model memory whenever the app leaves the foreground, and pause
+  // background embedding until it comes back.
+  const [active, setActive] = useState(AppState.currentState !== 'background');
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => s === 'background' && release());
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'background') release();
+      setActive(s !== 'background');
+    });
     return () => sub.remove();
   }, []);
 
-  // Keep embeddings current in the background, a few items at a time.
+  // Keep embeddings current while the app is open, until the backlog is empty.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !active) return;
     let live = true;
     (async () => {
       for (const row of await actions.listEmbeddings(EMBED_MODEL.id)) vectors.current.set(row.id, fromBytes(row.embedding));
       const byId = new Map(items.map((i) => [i.id, i]));
-      for (const id of await actions.staleEmbeddings(EMBED_MODEL.id, 200)) {
-        if (!live) return;
-        const item = byId.get(id);
-        if (!item) continue;
-        const v = await embed(itemText(item, index), 'document');
-        if (!live || v.length === 0) return;
-        vectors.current.set(id, v);
-        await actions.setEmbedding(id, toBytes(v), EMBED_MODEL.id);
+      const tried = new Set<string>();
+      while (live) {
+        const batch = (await actions.staleEmbeddings(EMBED_MODEL.id, 50)).filter((id) => !tried.has(id));
+        // Done, or only items this snapshot doesn't know yet (a refresh restarts the loop).
+        if (batch.length === 0) return;
+        for (const id of batch) {
+          if (!live) return;
+          tried.add(id);
+          const item = byId.get(id);
+          if (!item) continue;
+          // Stamp with the version that was read, so an edit made meanwhile stays stale.
+          const v = await embed(itemText(item, index), 'document');
+          if (!live || v.length === 0) return;
+          vectors.current.set(id, v);
+          await actions.setEmbedding(id, toBytes(v), EMBED_MODEL.id, item.updatedAt);
+        }
       }
     })().catch(() => {});
     return () => {
       live = false;
     };
-  }, [ready, items, index, actions]);
+  }, [ready, active, items, index, actions]);
 
   const suggest = useCallback<AssistantValue['suggest']>(
     async (input) => {
       if (status.state !== 'ready') return { name: null, tags: [] };
-      let temp: File | null = null;
-      let uri = input.photo?.uri ?? null;
-      if (!uri && input.photo?.base64) {
-        // llama.cpp reads images from a file; this one is deleted right after.
-        temp = new File(Paths.cache, `assistant-${Date.now()}.jpg`);
-        temp.create();
-        await temp.write(base64ToBytes(input.photo.base64));
-        uri = temp.uri;
-      }
-      try {
-        const knownTags = [...new Set(items.flatMap((i) => i.tags))];
-        return await draftTags(status.model, { ...input, photoUri: uri, knownTags, existing: input.existing });
-      } finally {
-        try {
-          temp?.delete();
-        } catch {
-          // Cache is cleared by the OS eventually.
-        }
-      }
+      const knownTags = [...new Set(items.flatMap((i) => i.tags))];
+      const run = (photoUri: string | null) => draftTags(status.model, { ...input, photoUri, knownTags, existing: input.existing });
+      if (input.photo?.uri) return run(input.photo.uri);
+      // llama.cpp reads images from a file; this one is deleted right after.
+      if (input.photo?.base64) return withTempJpeg(input.photo.base64, run);
+      return run(null);
     },
     [status, items],
   );

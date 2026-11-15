@@ -3,8 +3,13 @@ import { scrypt } from '@noble/hashes/scrypt.js';
 import { randomBytes } from 'node:crypto';
 
 import {
+  checkPassphrase,
+  BackupTooLargeError,
   dumpCatalog,
+  NewerArchiveError,
   NotAnArchiveError,
+  passphraseStrength,
+  reRootBrokenPlaces,
   openArchive,
   peekArchive,
   restoreCatalog,
@@ -14,6 +19,8 @@ import {
   type Aead,
   type ArchiveDeps,
 } from '../src/backup/archive';
+import { buildLocationIndex } from '../src/lib/locations';
+
 import { testRepo } from './testDb';
 
 const aead: Aead = {
@@ -36,6 +43,15 @@ async function sampleCatalog() {
 }
 
 describe('archive', () => {
+  it('stops with a clear error instead of building an archive too large for memory', async () => {
+    const { db, repo } = await sampleCatalog();
+    const item = (await repo.listItems())[0]!;
+    await repo.addPhoto({ itemId: item.id }, { data: 'x'.repeat(2000), thumb: 'y'.repeat(100), width: 1, height: 1 });
+    await expect(dumpCatalog(db, 1, 1000)).rejects.toBeInstanceOf(BackupTooLargeError);
+    await expect(dumpCatalog(db, 1, 1000)).rejects.toThrow(/too large to back up/);
+    await expect(dumpCatalog(db, 1)).resolves.toBeTruthy();
+  });
+
   it('round-trips the whole catalog into a fresh database', async () => {
     const source = await sampleCatalog();
     const file = await sealArchive(await dumpCatalog(source.db, 42), 'correct horse battery', deps);
@@ -111,9 +127,68 @@ describe('archive', () => {
   it('refuses short passphrases and files that are not archives', async () => {
     const { db } = await sampleCatalog();
     await expect(sealArchive(await dumpCatalog(db, 1), 'short', deps)).rejects.toThrow(/at least/);
+    await expect(sealArchive(await dumpCatalog(db, 1), 'ninechars', deps)).rejects.toThrow(/at least/);
     await expect(openArchive(new TextEncoder().encode('hello there, not a backup'), 'whatever!', deps)).rejects.toBeInstanceOf(
       NotAnArchiveError,
     );
+  });
+
+  it('accepts 10 characters or 3 words, and grades strength', () => {
+    expect(checkPassphrase('tencharsxx')).toBeNull();
+    expect(checkPassphrase('red fox ran')).toBeNull();
+    expect(checkPassphrase('red fox')).toMatch(/at least/);
+    expect(passphraseStrength('red fox')).toBe('too short');
+    expect(passphraseStrength('tencharsxx')).toBe('fair');
+    expect(passphraseStrength('red fox ran')).toBe('good');
+    expect(passphraseStrength('correct horse battery staple')).toBe('strong');
+  });
+
+  it('refuses files that ask for huge scrypt costs or malformed salts', async () => {
+    const { db } = await sampleCatalog();
+    const good = await sealArchive(await dumpCatalog(db, 1), 'correct horse battery', deps);
+    const forge = (patch: (h: Record<string, unknown>) => void) => {
+      const len = new DataView(good.buffer, good.byteOffset).getUint32(5);
+      const header = JSON.parse(new TextDecoder().decode(good.subarray(9, 9 + len)));
+      patch(header);
+      const bytes = new TextEncoder().encode(JSON.stringify(header));
+      const out = new Uint8Array(9 + bytes.length + 32);
+      out.set(good.subarray(0, 5), 0);
+      new DataView(out.buffer).setUint32(5, bytes.length);
+      out.set(bytes, 9);
+      return out;
+    };
+    for (const patch of [
+      (h: Record<string, unknown>) => (h.N = 2 ** 20),
+      (h: Record<string, unknown>) => (h.N = 3000),
+      (h: Record<string, unknown>) => (h.r = 16),
+      (h: Record<string, unknown>) => (h.p = 4),
+      (h: Record<string, unknown>) => (h.salt = 'abcd'),
+      (h: Record<string, unknown>) => (h.nonce = 'zz'),
+    ]) {
+      expect(() => peekArchive(forge(patch))).toThrow(NotAnArchiveError);
+    }
+  });
+
+  it('new backups use the stronger KDF; old cheaper ones still open', async () => {
+    const { db } = await sampleCatalog();
+    const file = await sealArchive(await dumpCatalog(db, 1), 'correct horse battery', { ...deps, kdf: undefined });
+    expect(Buffer.from(file).includes(`"N":${2 ** 17}`)).toBe(true);
+  }, 30_000);
+
+  it('restores places that form a loop or point nowhere as top-level places', async () => {
+    const source = await sampleCatalog();
+    const dump = await dumpCatalog(source.db, 1);
+    const locs = dump.tables.locations!;
+    const [a, b] = [locs[0]!, locs[1]!];
+    a.parent_id = String(b.id);
+    b.parent_id = String(a.id);
+    locs[2]!.parent_id = 'missing-place';
+    const target = await testRepo();
+    await restoreCatalog(target.db, dump);
+    const index = buildLocationIndex(await target.repo.listLocations());
+    for (const l of index.byId.values()) expect(index.isWithin(l.parentId, l.id)).toBe(false);
+    expect(index.byId.get(String(locs[2]!.id))!.parentId).toBeNull();
+    expect(reRootBrokenPlaces([{ id: 'x', parent_id: 'x' }])).toEqual([{ id: 'x', parent_id: null }]);
   });
 
   it('leaves the catalog untouched when a restore fails part-way', async () => {
@@ -124,5 +199,43 @@ describe('archive', () => {
     await target.repo.addItem({ name: 'Keep me', placeNames: ['Drawer'] });
     await expect(restoreCatalog(target.db, dump)).rejects.toThrow();
     expect((await target.repo.listItems()).map((i) => i.name)).toEqual(['Keep me']);
+  });
+  it("replaces the whole catalog but keeps this phone's own settings", async () => {
+    const source = await sampleCatalog();
+    const dump = await dumpCatalog(source.db, 1);
+    const target = await testRepo();
+    await target.repo.addItem({ name: 'Old thing', placeNames: ['Old place'] });
+    await target.repo.setSetting('device.hapticsOff', '1');
+    await target.repo.setSetting('reminders.on', '0');
+    await restoreCatalog(target.db, dump);
+    expect((await target.repo.listItems()).map((i) => i.name).sort()).toEqual(['Drill', 'Ladder']);
+    expect((await target.repo.listLocations()).map((l) => l.name)).not.toContain('Old place');
+    expect(await target.repo.getSetting('device.hapticsOff')).toBe('1');
+    expect(await target.repo.getSetting('reminders.on')).toBe('1');
+    // The source phone's notification ids never come across.
+    expect(await target.repo.getSetting('device.notificationIds')).toBeNull();
+  });
+
+  it('refuses a backup from a newer app and ignores columns it does not know', async () => {
+    const source = await sampleCatalog();
+    const newer = await dumpCatalog(source.db, 1);
+    newer.schemaVersion += 1;
+    const target = await testRepo();
+    await expect(restoreCatalog(target.db, newer)).rejects.toBeInstanceOf(NewerArchiveError);
+
+    const extra = await dumpCatalog(source.db, 1);
+    for (const row of extra.tables.items!) row['colour; DROP TABLE items'] = 'red';
+    await restoreCatalog(target.db, extra);
+    expect(await target.repo.listItems()).toHaveLength(2);
+  });
+
+  it('restores an empty catalog to an empty catalog', async () => {
+    const empty = await testRepo();
+    const dump = await dumpCatalog(empty.db, 1);
+    const target = await testRepo();
+    await target.repo.addItem({ name: 'Gone after restore' });
+    await restoreCatalog(target.db, dump);
+    expect(await target.repo.listItems()).toEqual([]);
+    expect(await target.repo.listLocations()).toEqual([]);
   });
 });

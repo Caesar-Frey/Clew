@@ -1,16 +1,19 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Alert, AppState, Linking, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { canSealWithBiometrics, canUseDeviceAuth, RELOCK_AFTER_MS, useAppLock } from '@/security/lock';
+import { MODEL_LICENCES } from '@/ai/models';
 import { AssistantCard } from '@/components/AssistantCard';
 import { REMINDERS_OFF_KEY } from '@/components/ReminderSync';
 import { olderThan, relativeDays, shortDate } from '@/lib/format';
 import { askForReminders, reminderPermission, type ReminderPermission } from '@/reminders/scheduler';
+import { BACKUP_STALE_MS } from '@/lib/backupNudge';
 import { LAST_BACKUP_KEY, useData } from '@/state/data';
 import { IndexCard, LibraryButton, Room, SectionLabel, T } from '@/ui/components';
+import { HAPTICS_OFF_KEY, setHapticsEnabled } from '@/ui/haptics';
 import { ArchiveBoxIcon, BellIcon, KeyholeIcon } from '@/ui/icons';
 import { usePalette } from '@/ui/theme';
 
@@ -19,16 +22,21 @@ export default function DeskScreen() {
   const insets = useSafeAreaInsets();
   const { items, locations, settings, actions } = useData();
   const [permission, setPermission] = useState<ReminderPermission | null>(null);
-  const remindersOn = settings[REMINDERS_OFF_KEY] !== '1' && permission !== 'denied';
+  // Off until notifications are actually allowed, so the switch never claims reminders that can't arrive.
+  const remindersOn = settings[REMINDERS_OFF_KEY] !== '1' && permission === 'granted';
 
   useEffect(() => {
-    reminderPermission().then(setPermission).catch(() => setPermission('denied'));
+    const check = () => reminderPermission().then(setPermission).catch(() => setPermission('denied'));
+    check();
+    // Coming back from Settings may have changed it.
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
+    return () => sub.remove();
   }, []);
 
   const toggleReminders = async (on: boolean) => {
     if (on && permission !== 'granted') {
       const granted = permission === 'undetermined' && (await askForReminders());
-      setPermission(granted ? 'granted' : 'denied');
+      setPermission(await reminderPermission().catch(() => (granted ? 'granted' : 'denied')));
       if (!granted) {
         Alert.alert('Notifications are off', 'Allow notifications for Clew in Settings to get due-date reminders.', [
           { text: 'Not now', style: 'cancel' },
@@ -58,7 +66,7 @@ export default function DeskScreen() {
     try {
       await lock.unseal();
     } catch (e) {
-      Alert.alert("Couldn't unseal", e instanceof Error ? e.message : String(e));
+      Alert.alert("Couldn't turn off the Face ID requirement", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -80,7 +88,7 @@ export default function DeskScreen() {
 
   const lent = items.filter((i) => i.activeLoan).length;
   const lastBackup = settings[LAST_BACKUP_KEY] ? Number(settings[LAST_BACKUP_KEY]) : null;
-  const backupStale = items.length > 0 && olderThan(lastBackup, BACKUP_NUDGE_MS);
+  const backupStale = items.length > 0 && olderThan(lastBackup, BACKUP_STALE_MS);
 
   return (
     <Room>
@@ -109,30 +117,30 @@ export default function DeskScreen() {
               value={lock.enabled}
               disabled={busy || available === null}
               onValueChange={toggleLock}
-              trackColor={{ true: p.lamp, false: p.cardEdge }}
+              trackColor={{ true: p.lamp, false: p.inkFaint }}
               thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
-              ios_backgroundColor={p.cardEdge}
+              ios_backgroundColor={p.inkFaint}
               accessibilityLabel="App lock"
             />
           </View>
           {lock.enabled && (canSeal || lock.sealed) && (
             <View style={[styles.row, styles.subRow, { borderTopColor: p.rule }]}>
               <View style={{ flex: 1, gap: 2 }}>
-                <T variant="body">Seal with Face ID or fingerprint</T>
+                <T variant="body">Require Face ID to open data</T>
                 <T variant="small">
                   {lock.sealed
                     ? 'The catalog key is released only by your face or fingerprint. A recovery passphrase is kept as a spare.'
-                    : 'Stronger: the key that decrypts your catalog needs your face or fingerprint.'}
+                    : 'Stronger than the app lock: your data can only be decrypted after Face ID or a fingerprint.'}
                 </T>
               </View>
               <Switch
                 value={lock.sealed}
                 disabled={busy}
                 onValueChange={toggleSeal}
-                trackColor={{ true: p.lamp, false: p.cardEdge }}
+                trackColor={{ true: p.lamp, false: p.inkFaint }}
                 thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
-                ios_backgroundColor={p.cardEdge}
-                accessibilityLabel="Seal with Face ID or fingerprint"
+                ios_backgroundColor={p.inkFaint}
+                accessibilityLabel="Require Face ID to open data"
               />
             </View>
           )}
@@ -157,10 +165,27 @@ export default function DeskScreen() {
               value={remindersOn}
               disabled={permission === null}
               onValueChange={toggleReminders}
-              trackColor={{ true: p.lamp, false: p.cardEdge }}
+              trackColor={{ true: p.lamp, false: p.inkFaint }}
               thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
-              ios_backgroundColor={p.cardEdge}
+              ios_backgroundColor={p.inkFaint}
               accessibilityLabel="Due-date reminders"
+            />
+          </View>
+          <View style={[styles.row, styles.subRow, { borderTopColor: p.rule }]}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <T variant="body">Haptics</T>
+              <T variant="small">Small taps you feel when you save, move or return something.</T>
+            </View>
+            <Switch
+              value={settings[HAPTICS_OFF_KEY] !== '1'}
+              onValueChange={(on) => {
+                setHapticsEnabled(on);
+                actions.setSetting(HAPTICS_OFF_KEY, on ? '0' : '1').catch(() => {});
+              }}
+              trackColor={{ true: p.lamp, false: p.inkFaint }}
+              thumbColor={p.scheme === 'dark' ? p.brassLight : '#FFFDF6'}
+              ios_backgroundColor={p.inkFaint}
+              accessibilityLabel="Haptics"
             />
           </View>
         </IndexCard>
@@ -213,15 +238,40 @@ export default function DeskScreen() {
             <Rule text="Your catalog is encrypted with a key kept in the phone's secure keychain." />
             <Rule text="Backups are sealed with your passphrase before they leave the app." />
             <Rule text="No ads, no analytics, no tracking. The app only goes online to download the optional assistant, if you ask it to." />
+            <Rule text="Voice uses the phone's own speech recognition. Where that would send audio to Apple or Google, Clew asks first." />
           </View>
         </IndexCard>
 
-        <SectionLabel>Holdings</SectionLabel>
+        <SectionLabel>Your catalog in numbers</SectionLabel>
         <View style={styles.stats}>
           <Stat label="Cards" value={items.length} />
           <Stat label="Places" value={locations.length} />
           <Stat label="Lent out" value={lent} />
         </View>
+
+        <SectionLabel>Open-source licences</SectionLabel>
+        <IndexCard punched={false} ruled={false} style={{ paddingBottom: 16 }}>
+          <View style={{ gap: 10 }}>
+            <T variant="small">The optional assistant downloads these open models. Each is used under its licence.</T>
+            {MODEL_LICENCES.map((m) => (
+              <View key={m.name} style={[styles.row, styles.licence, { borderTopColor: p.rule }]}>
+                <T variant="body" style={{ flex: 1 }}>
+                  {m.name}
+                </T>
+                <T
+                  variant="small"
+                  color={p.headRule}
+                  accessibilityRole="link"
+                  accessibilityLabel={`${m.name}, ${m.licence} licence. Opens the model page.`}
+                  onPress={() => Linking.openURL(m.source)}
+                  style={styles.link}
+                >
+                  {m.licence}
+                </T>
+              </View>
+            ))}
+          </View>
+        </IndexCard>
 
         <T variant="small" color={p.inkFaint} style={{ textAlign: 'center', marginTop: 12 }}>
           Clew {Constants.expoConfig?.version ?? ''}
@@ -234,8 +284,6 @@ export default function DeskScreen() {
   );
 }
 
-/** Suggest a fresh backup after this long. */
-const BACKUP_NUDGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function Rule({ text }: { text: string }) {
   const p = usePalette();
@@ -266,6 +314,8 @@ const styles = StyleSheet.create({
   badge: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   stats: { flexDirection: 'row', gap: 10 },
   buttons: { flexDirection: 'row', gap: 10 },
+  licence: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  link: { minHeight: 44, textAlignVertical: 'center', paddingVertical: 12, textDecorationLine: 'underline' },
   subRow: { marginTop: 14, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
   stat: { flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 4, borderWidth: StyleSheet.hairlineWidth },
 });

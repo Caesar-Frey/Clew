@@ -2,10 +2,13 @@ import type { Location } from '../db/types';
 
 export const PATH_SEPARATOR = ' › ';
 
-/** "House > Garage / Blue box" -> ["House", "Garage", "Blue box"] */
+/**
+ * "House > Garage › Blue box" -> ["House", "Garage", "Blue box"]. Only ">" and
+ * "›" separate places, so names like "TV/Media shelf" survive.
+ */
 export function parsePathInput(input: string): string[] {
   return input
-    .split(/[>›/\\]/)
+    .split(/[>›]/)
     .map((s) => s.trim().replace(/\s+/g, ' '))
     .filter((s) => s.length > 0);
 }

@@ -9,19 +9,26 @@ import { Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AssistantProvider } from '@/ai/assistant';
 import { DataGate } from '@/components/DataGate';
 import { ReminderSync } from '@/components/ReminderSync';
+import { sweepPlaintextCaches } from '@/photos/tempFiles';
 import { LockGate } from '@/security/lock';
 import { DataProvider } from '@/state/data';
 import { fonts, usePalette } from '@/ui/theme';
 import { ToastProvider } from '@/ui/toast';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+// Plaintext photo copies left behind if the app was killed mid-capture.
+if (Platform.OS !== 'web') sweepPlaintextCaches();
 // The drawer fades into the reading room rather than snapping away.
 SplashScreen.setOptions({ fade: true, duration: 350 });
+
+/** A cold start straight onto a card (e.g. from a reminder) still has the tabs underneath. */
+export const unstable_settings = { initialRouteName: '(tabs)' };
 
 export default function RootLayout() {
   const p = usePalette();
@@ -71,12 +78,14 @@ export default function RootLayout() {
                 <Stack.Screen name="add" options={{ presentation: 'modal', title: 'New card' }} />
                 <Stack.Screen name="item/[id]" options={{ title: '' }} />
                 <Stack.Screen name="place/[id]" options={{ title: '' }} />
-                <Stack.Screen name="move/[id]" options={{ presentation: 'modal', title: 'Re-shelve' }} />
-                <Stack.Screen name="lend/[id]" options={{ presentation: 'modal', title: 'Check out' }} />
+                <Stack.Screen name="browse" options={{ title: 'All things' }} />
+                <Stack.Screen name="move/[id]" options={{ presentation: 'modal', title: 'Move' }} />
+                <Stack.Screen name="move-place/[id]" options={{ presentation: 'modal', title: 'Move this place' }} />
+                <Stack.Screen name="lend/[id]" options={{ presentation: 'modal', title: 'Lend' }} />
                 <Stack.Screen name="archive" options={{ presentation: 'modal', title: 'Backup' }} />
                 <Stack.Screen name="photo/[id]" options={{ presentation: 'modal', title: 'Photo' }} />
                 <Stack.Screen name="identify" options={{ presentation: 'modal', title: 'Which box is this?' }} />
-                <Stack.Screen name="seal" options={{ presentation: 'modal', title: 'Seal the catalog' }} />
+                <Stack.Screen name="seal" options={{ presentation: 'modal', title: 'Face ID lock' }} />
               </Stack>
               </ToastProvider>
               </AssistantProvider>

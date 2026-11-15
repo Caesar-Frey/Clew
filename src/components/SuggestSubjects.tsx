@@ -1,5 +1,4 @@
-import * as Haptics from 'expo-haptics';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { useAssistant } from '@/ai/assistant';
@@ -7,9 +6,10 @@ import { tagList, type TagDraft } from '@/ai/text';
 import { T } from '@/ui/components';
 import { SparkIcon } from '@/ui/icons';
 import { fonts, usePalette } from '@/ui/theme';
+import { haptic } from '@/ui/haptics';
 
 /**
- * "Suggest subjects": asks the on-device assistant for a name and subjects,
+ * "Suggest tags": asks the on-device assistant for a name and tags,
  * shown as pencilled slips the user taps to keep. Nothing is applied without
  * a tap. Renders nothing unless the assistant is installed.
  */
@@ -20,15 +20,18 @@ export function SuggestSubjects({
   tags,
   onTag,
   onName,
+  autoAsk,
 }: {
   name: string;
   notes?: string;
   photo: { uri?: string; base64?: string } | null;
-  /** The subjects field as typed. */
+  /** The tags field as typed. */
   tags: string;
   onTag: (tag: string) => void;
   /** Offered only when set (e.g. while the name is still empty). */
   onName?: (name: string) => void;
+  /** Ask by itself when a photo arrives (photo-first adding). */
+  autoAsk?: boolean;
 }) {
   const p = usePalette();
   const { status, suggest } = useAssistant();
@@ -36,13 +39,9 @@ export function SuggestSubjects({
   const [draft, setDraft] = useState<TagDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (status.state !== 'ready') return null;
-  const canAsk = !busy && (!!name.trim() || !!photo);
-  const have = new Set(tagList(tags).map((t) => t.toLowerCase()));
-  const open = draft?.tags.filter((t) => !have.has(t)) ?? [];
-  const offerName = onName && draft?.name && draft.name.toLowerCase() !== name.trim().toLowerCase() ? draft.name : null;
+  const ready = status.state === 'ready';
 
-  const ask = async () => {
+  const ask = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
@@ -54,13 +53,29 @@ export function SuggestSubjects({
     } finally {
       setBusy(false);
     }
-  };
+  }, [suggest, name, notes, photo, tags]);
+
+  // Photo first, no name yet: look at it straight away, once per photo.
+  const askedFor = useRef<string | null>(null);
+  const photoKey = photo?.base64 ?? photo?.uri ?? null;
+  const wantsAuto = !!autoAsk && ready && !!photoKey && !name.trim() && !busy;
+  useEffect(() => {
+    if (!wantsAuto || askedFor.current === photoKey) return;
+    askedFor.current = photoKey;
+    Promise.resolve().then(ask);
+  }, [wantsAuto, photoKey, ask]);
+
+  if (!ready) return null;
+  const canAsk = !busy && (!!name.trim() || !!photo);
+  const have = new Set(tagList(tags).map((t) => t.toLowerCase()));
+  const open = draft?.tags.filter((t) => !have.has(t)) ?? [];
+  const offerName = onName && draft?.name && draft.name.toLowerCase() !== name.trim().toLowerCase() ? draft.name : null;
 
   return (
     <View style={{ gap: 10 }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Suggest subjects"
+        accessibilityLabel="Suggest tags"
         accessibilityHint={photo ? 'The assistant looks at the photo on this phone' : 'The assistant reads the name on this phone'}
         accessibilityState={{ disabled: !canAsk, busy }}
         disabled={!canAsk}
@@ -70,7 +85,7 @@ export function SuggestSubjects({
       >
         {busy ? <ActivityIndicator size="small" color={p.leatherText} /> : <SparkIcon size={16} color={p.leatherText} />}
         <T variant="small" color={p.leatherText}>
-          {busy ? 'The assistant is looking…' : draft ? 'Suggest again' : 'Suggest subjects'}
+          {busy ? 'The assistant is looking…' : draft ? 'Suggest again' : 'Suggest tags'}
         </T>
       </Pressable>
 
@@ -87,7 +102,7 @@ export function SuggestSubjects({
             />
           )}
           {open.map((t) => (
-            <Slip key={t} label={`+ ${t}`} a11y={`Add subject ${t}`} onPress={() => onTag(t)} />
+            <Slip key={t} label={`+ ${t}`} a11y={`Add tag ${t}`} onPress={() => onTag(t)} />
           ))}
         </View>
       )}
@@ -107,7 +122,7 @@ function Slip({ label, a11y, onPress }: { label: string; a11y: string; onPress: 
       accessibilityRole="button"
       accessibilityLabel={a11y}
       onPress={() => {
-        Haptics.selectionAsync().catch(() => {});
+        haptic.selection().catch(() => {});
         onPress();
       }}
       style={({ pressed }) => [

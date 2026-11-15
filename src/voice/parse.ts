@@ -42,41 +42,95 @@ function capitalize(s: string): string {
   return s ? s[0]!.toUpperCase() + s.slice(1) : s;
 }
 
+/** "uncle bob" -> "Uncle Bob"; "sam and priya" -> "Sam and Priya" (one borrower string). */
 function properName(s: string): string {
   return stripArticle(s)
     .split(' ')
-    .map((w) => capitalize(w))
+    .map((w) => (/^(?:and|&)$/i.test(w) ? w.toLowerCase() : capitalize(w)))
     .join(' ');
 }
 
-/** "for two weeks", "until tomorrow", "for 3 days", "till next month" */
-function parseDue(text: string): { rest: string; days: number | null } {
-  const m = text.match(
-    /\s+(?:for|until|till|til|by|due|back in|back by|due in)\s+(?:(?:about|around)\s+)?(?:(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|few)\s+(?:of\s+)?(day|week|month)s?|(tomorrow|next week|next month|the weekend|the end of the week))\s*$/i,
-  );
-  if (!m) return { rest: text, days: null };
-  let days: number;
+/** A pronoun is not a name: "I lent it to Sam" leaves the name for the user. */
+const PRONOUN = /^(?:it|this|that|them|these|those|one)$/i;
+const thingName = (s: string) => {
+  const n = stripArticle(s);
+  return PRONOUN.test(n) ? '' : capitalize(n);
+};
+
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whole calendar days from `now` to the given local date (DST-safe). */
+function daysUntil(now: Date, y: number, m: number, d: number): number {
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+  return Math.round((new Date(y, m, d, 12).getTime() - from.getTime()) / DAY_MS);
+}
+
+/** Days from `now` to a spoken point in time ("Friday", "next week", "the end of the month"). */
+function calendarDays(phrase: string, now: Date): number | null {
+  const p = phrase.toLowerCase().replace(/^the\s+/, '');
+  const dow = now.getDay();
+  if (p === 'tomorrow') return 1;
+  const weekday = p.match(/^(?:(this|next)\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
+  if (weekday) {
+    const target = WEEKDAYS.indexOf(weekday[2]!);
+    let d = (target - dow + 7) % 7 || 7;
+    // "next Friday" is the Friday of next week; weeks start on Monday.
+    const mon = (x: number) => (x + 6) % 7;
+    if (weekday[1] === 'next' && mon(target) > mon(dow)) d += 7;
+    return d;
+  }
+  if (/^(?:this\s+)?weekend$/.test(p) || p === 'end of the week' || p === 'end of this week') return (6 - dow + 7) % 7 || 7;
+  if (p === 'next weekend') return ((6 - dow + 7) % 7 || 7) + 7;
+  if (p === 'next week') return (1 - dow + 7) % 7 || 7;
+  if (p === 'next month') {
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const last = new Date(y, m + 1, 0).getDate();
+    return daysUntil(now, y, m, Math.min(now.getDate(), last));
+  }
+  if (p === 'end of the month' || p === 'end of this month') {
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    if (now.getDate() < last) return daysUntil(now, now.getFullYear(), now.getMonth(), last);
+    return daysUntil(now, now.getFullYear(), now.getMonth() + 2, 0);
+  }
+  return null;
+}
+
+const SPAN = '(?:(?:about|around)\\s+)?(?:a\\s+)?(\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|few)\\s+(?:of\\s+)?(day|week|month)s?';
+const POINT =
+  '((?:the\\s+)?(?:end of (?:the|this) (?:week|month)|(?:this\\s+|next\\s+)?weekend)|tomorrow|next week|next month|(?:(?:this|next)\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))';
+const DUE = new RegExp(`\\s+(?:for|until|till|til|by|due|back in|back by|back on|due in|on)\\s+(?:${SPAN}|${POINT})\\s*$`, 'i');
+const BARE_SPAN = new RegExp(`\\s+(?:for\\s+)?${SPAN}\\s*$`, 'i');
+
+/** "for two weeks", "until Friday", "for a couple of weeks", "till the end of the month" */
+function parseDue(text: string, now: Date): { rest: string; days: number | null } {
+  const m = text.match(DUE) ?? text.match(BARE_SPAN);
+  if (!m || m.index === undefined) return { rest: text, days: null };
+  let days: number | null;
   if (m[3]) {
-    const word = m[3].toLowerCase();
-    days = word === 'tomorrow' ? 1 : word === 'next month' ? 30 : 7;
+    days = calendarDays(m[3], now);
   } else {
     const n = /^\d+$/.test(m[1]!) ? Number(m[1]) : (NUMBERS[m[1]!.toLowerCase()] ?? 1);
     const unit = m[2]!.toLowerCase();
     days = n * (unit === 'week' ? 7 : unit === 'month' ? 30 : 1);
   }
+  if (days === null) return { rest: text, days: null };
   return { rest: text.slice(0, m.index), days: Math.min(days, 365) };
 }
 
 /** "the blue box in the garage" -> ["Garage", "Blue box"] */
 export function splitPlace(text: string): string[] {
   const parts: string[] = [];
-  let rest = clean(text);
+  // "on the left/right/top/bottom" describes a place, it isn't another one:
+  // hide it from the splitting below, then put it back.
+  let rest = clean(text).replace(/\s+on\s+the\s+(left|right|top|bottom)((?:\s+(?:side|shelf|hand side))?)(?=\s|$)/gi, '\u0001$1$2');
   // Spoken outermost-last: "blue box in the garage" -> ["Garage", "Blue box"].
   // A typed or spoken path ("garage greater than blue box") wins.
   if (/[>›/]|\bgreater than\b/i.test(rest)) {
     return rest
       .split(/\s*(?:[>›/]|\bgreater than\b)\s*/i)
-      .map((p) => capitalize(stripArticle(p)))
+      .map((p) => capitalize(stripArticle(p)).replace(/\u0001/g, ' on the '))
       .filter(Boolean);
   }
   for (;;) {
@@ -90,24 +144,34 @@ export function splitPlace(text: string): string[] {
     .map((p) => {
       const kept = p.match(KEPT_PREPOSITION);
       const body = stripArticle(kept ? p.slice(kept[0].length) : p);
-      return capitalize(kept ? `${kept[1]!.toLowerCase()} the ${body}` : body);
+      return capitalize(kept ? `${kept[1]!.toLowerCase()} the ${body}` : body).replace(/\u0001/g, ' on the ');
     })
     .filter(Boolean);
 }
 
-export function parseSpokenCard(raw: string): SpokenCard {
+export function parseSpokenCard(raw: string, now: number = Date.now()): SpokenCard {
   let text = clean(raw).replace(FILLER, '');
   const empty = { place: [] as string[], person: null, dueInDays: null };
 
   // Lending.
-  const due = parseDue(text);
-  const lent = due.rest.match(/^(?:i\s+)?(?:lent|loaned|gave|lend|loan)\s+(.+?)\s+to\s+(.+)$/i);
+  const due = parseDue(text, new Date(now));
+  const lent = due.rest.match(/^(?:i(?:'ve| have)?\s+)?(?:lent|loaned|gave|given|lend|loan)\s+(.+?)\s+to\s+(.+)$/i);
   if (lent && lent[1] && lent[2]) {
-    return { name: capitalize(stripArticle(lent[1])), place: [], person: properName(lent[2]), dueInDays: due.days };
+    return { name: thingName(lent[1]), place: [], person: properName(lent[2]), dueInDays: due.days };
+  }
+  // "I lent Sam the drill": a name, then the thing with its article.
+  const lentWho = due.rest.match(/^(?:i(?:'ve| have)?\s+)?(?:lent|loaned|gave|given|lend|loan)\s+([a-z][\w'-]*)\s+((?:the|my|our|a|an|his|her|their|some)\s+.+)$/i);
+  if (lentWho && lentWho[1] && lentWho[2] && !PRONOUN.test(lentWho[1]) && !ARTICLE.test(`${lentWho[1]} `)) {
+    return { name: thingName(lentWho[2]), place: [], person: properName(lentWho[1]), dueInDays: due.days };
+  }
+  // "the drill is with Sam" (but "the passport is with the documents" is a place).
+  const withWho = due.rest.match(/^(.+?)\s+(?:is|are|'s)\s+with\s+(.+)$/i);
+  if (withWho && withWho[1] && withWho[2] && !ARTICLE.test(withWho[2])) {
+    return { name: thingName(withWho[1]), place: [], person: properName(withWho[2]), dueInDays: due.days };
   }
   const has = due.rest.match(/^(.+?)\s+(?:has|borrowed|took|is borrowing|has got)\s+(.+)$/i);
-  if (has && has[1] && has[2] && !/^(?:it|this|that)$/i.test(stripArticle(has[1]))) {
-    return { name: capitalize(stripArticle(has[2])), place: [], person: properName(has[1]), dueInDays: due.days };
+  if (has && has[1] && has[2] && !PRONOUN.test(stripArticle(has[1]))) {
+    return { name: thingName(has[2]), place: [], person: properName(has[1]), dueInDays: due.days };
   }
 
   // Putting away: "I put X in Y", "X is in Y", "X in Y".
@@ -121,18 +185,40 @@ export function parseSpokenCard(raw: string): SpokenCard {
     if (keptPrep && /^(?:under|underneath|behind|beside|next|top|above|below|front|between)$/.test(prep)) {
       placeText = `${keptPrep[1]} ${placeText}`;
     }
-    return { ...empty, name: capitalize(stripArticle(name)), place: splitPlace(placeText) };
+    return { ...empty, name: thingName(name), place: splitPlace(placeText) };
   }
-  return { ...empty, name: capitalize(stripArticle(text)) };
+  return { ...empty, name: thingName(text) };
 }
 
-/** "where's my passport" -> "passport" */
+const QUESTION_START = new RegExp(
+  '^(?:' +
+    [
+      "(?:do|did) you know where",
+      "(?:have|has) (?:you|anyone) seen",
+      "where (?:can|could|do|did|might|should|would) i (?:find|get|look for|have put|have left|put|leave|keep)",
+      "where did i (?:put|leave)",
+      "where(?:'s|s| is| are| was| were)",
+      'can you find',
+      'find',
+      'look for',
+      'search(?: for)?',
+      'have i got',
+      'do i have',
+    ].join('|') +
+    ')\\s+',
+  'i',
+);
+
+/**
+ * "where's my passport" -> "passport". Used for typed queries too, so a
+ * question typed as a sentence still finds the thing.
+ */
 export function spokenQuery(raw: string): string {
   return stripArticle(
     clean(raw)
       .replace(FILLER, '')
-      .replace(/^(?:where(?:'s| is| are| did i (?:put|leave))|find|look for|search(?: for)?|have i got|do i have)\s+/i, '')
-      .replace(/\s+(?:go|again|now)$/i, ''),
+      .replace(QUESTION_START, '')
+      .replace(/\s+(?:go|gone|again|now|at|is|are|was|were|kept|stored)$/i, ''),
   );
 }
 

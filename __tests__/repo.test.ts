@@ -1,3 +1,4 @@
+import { decodeFingerprint, MAX_VIEWS } from '../src/boxes/fingerprint';
 import { buildLocationIndex } from '../src/lib/locations';
 import { MIGRATIONS, migrate } from '../src/db/schema';
 import { testRepo } from './testDb';
@@ -61,6 +62,30 @@ describe('locations', () => {
     expect((await repo.listLocations()).map((l) => l.name).sort()).toEqual(['Garage', 'Shelf']);
   });
 
+  it('keeps box photos, fingerprint views and history when a merge removes a place', async () => {
+    const { repo } = await testRepo();
+    const innerShelf = await repo.ensureLocationPath(['Garage', 'Cupboard', 'Shelf']);
+    const outerShelf = await repo.ensureLocationPath(['Garage', 'Shelf']);
+    const glue = await repo.addItem({ name: 'Glue', locationId: innerShelf });
+    const v = (n: number) => ({ words: [], text: '', hist: [n], grid: [] });
+    const photo = { data: 'd', thumb: 't', width: 1, height: 1 };
+    for (let i = 0; i < 4; i++) await repo.addBoxView(outerShelf, v(i), photo);
+    const fromInner: string[] = [];
+    for (let i = 0; i < 3; i++) fromInner.push(await repo.addBoxView(innerShelf, v(10 + i), photo));
+
+    const cupboard = (await repo.listLocations()).find((l) => l.name === 'Cupboard')!;
+    await repo.deleteLocation(cupboard.id);
+
+    const box = (await repo.listBoxes()).find((b) => b.locationId === outerShelf)!;
+    const fp = decodeFingerprint(box.fingerprint)!;
+    expect(fp.views).toHaveLength(MAX_VIEWS);
+    // The newest views (from the merged shelf) survive, with their photos.
+    expect(fp.views.slice(-3).map((x) => x.photoId)).toEqual(fromInner);
+    expect(new Set(box.photoIds)).toEqual(new Set(fp.views.map((x) => x.photoId)));
+    const history = await repo.itemHistory(glue);
+    expect(history[0]).toMatchObject({ kind: 'moved', fromPath: 'Garage › Cupboard › Shelf', toPath: 'Garage › Shelf' });
+  });
+
   it('keeps contents when deleting a place whose child has the same name', async () => {
     const { repo } = await testRepo();
     const inner = await repo.ensureLocationPath(['Garage', 'Box', 'Box']);
@@ -105,6 +130,16 @@ describe('items', () => {
     const index = buildLocationIndex(await repo.listLocations());
     expect(index.pathString(item!.locationId)).toBe('Garage › Shelf');
     expect(item!.activeLoan).toMatchObject({ itemId: id, person: 'Sam', dueAt: 9 });
+  });
+
+  it('creates a chosen new place inside the given parent, not at the top level', async () => {
+    const { repo } = await testRepo();
+    const garage = await repo.ensureLocationPath(['House', 'Garage']);
+    await repo.addItem({ name: 'Drill', placeNames: ['Blue box'], placeParentId: garage });
+    const [item] = await repo.listItems();
+    const index = buildLocationIndex(await repo.listLocations());
+    expect(index.pathString(item!.locationId)).toBe('House › Garage › Blue box');
+    expect(index.children.get(null)!.map((l) => l.name)).toEqual(['House']);
   });
 
   it('saves nothing when part of an add fails, so retrying cannot duplicate', async () => {
@@ -163,6 +198,52 @@ describe('loans', () => {
     const kinds = (await repo.itemHistory(id)).map((h) => h.kind);
     expect(kinds).toEqual(['lent', 'returned', 'lent']);
     expect(await repo.knownPeople()).toEqual(['Alex', 'Sam']);
+  });
+
+  it('undoing a return does nothing once the item is lent again', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Drill', lendTo: { person: 'Sam' } });
+    const first = await repo.returnItem(id);
+    await repo.lendItem(id, { person: 'Alex' });
+    await repo.undoReturn(first!);
+    expect((await repo.listItems())[0]!.activeLoan).toMatchObject({ person: 'Alex' });
+    expect(await repo.returnItem(id)).not.toBeNull();
+    expect(await repo.returnItem(id)).toBeNull();
+  });
+
+  it('undoing a lend removes it from the history, but not once it was returned', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Tent' });
+    const loan = await repo.lendItem(id, { person: 'Sam' });
+    await repo.undoLend(loan);
+    expect((await repo.listItems())[0]!.activeLoan).toBeNull();
+    expect((await repo.itemHistory(id)).map((h) => h.kind)).not.toContain('lent');
+
+    const again = await repo.lendItem(id, { person: 'Sam' });
+    await repo.returnItem(id);
+    await repo.undoLend(again);
+    expect((await repo.itemHistory(id)).map((h) => h.kind)).toEqual(expect.arrayContaining(['lent', 'returned']));
+  });
+
+  it('changes and clears a due date, and moving a lent item keeps the loan', async () => {
+    const { repo } = await testRepo();
+    const shed = await repo.ensureLocationPath(['Shed']);
+    const id = await repo.addItem({ name: 'Saw', lendTo: { person: 'Sam', dueAt: 100 } });
+    const loanId = (await repo.listItems())[0]!.activeLoan!.id;
+    await repo.setLoanDue(loanId, 200);
+    expect((await repo.listItems())[0]!.activeLoan).toMatchObject({ dueAt: 200 });
+    await repo.setLoanDue(loanId, null);
+    expect((await repo.listItems())[0]!.activeLoan!.dueAt).toBeNull();
+    await repo.moveItem(id, shed);
+    expect((await repo.listItems())[0]).toMatchObject({ locationId: shed, activeLoan: { person: 'Sam' } });
+  });
+
+  it('two quick lends of the same thing leave exactly one loan', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Ladder' });
+    const results = await Promise.allSettled([repo.lendItem(id, { person: 'Sam' }), repo.lendItem(id, { person: 'Alex' })]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect((await repo.itemHistory(id)).filter((h) => h.kind === 'lent')).toHaveLength(1);
   });
 });
 
@@ -272,6 +353,24 @@ describe('boxes', () => {
     await repo.clearBox(box);
     expect(await repo.listBoxes()).toEqual([]);
   });
+
+  it('deletes the photo of a view that falls off the cap, with the fingerprint, in one go', async () => {
+    const { repo } = await testRepo();
+    const box = await repo.ensureLocationPath(['Garage', 'Blue box']);
+    const v = (n: number) => ({ words: n % 2 ? ['camping'] : [], text: '', hist: [n], grid: [] });
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_VIEWS + 2; i++) {
+      ids.push(await repo.addBoxView(box, v(i), { data: `d${i}`, thumb: `t${i}`, width: 1, height: 1 }));
+    }
+    const [info] = await repo.listBoxes();
+    const fp = decodeFingerprint(info!.fingerprint)!;
+    expect(fp.views).toHaveLength(MAX_VIEWS);
+    expect(info!.photoIds).toHaveLength(MAX_VIEWS);
+    expect(new Set(info!.photoIds)).toEqual(new Set(fp.views.map((x) => x.photoId)));
+    expect(await repo.getPhoto(ids[0]!)).toBeNull();
+    expect(await repo.getPhoto(ids.at(-1)!)).not.toBeNull();
+    await expect(repo.addBoxView('nope', v(1), { data: 'd', thumb: 't', width: 1, height: 1 })).rejects.toThrow(/no longer exists/);
+  });
 });
 
 describe('assistant data', () => {
@@ -293,12 +392,102 @@ describe('assistant data', () => {
     const { repo } = await testRepo();
     const id = await repo.addItem({ name: 'Drill' });
     expect(await repo.staleEmbeddings('m')).toEqual([id]);
-    await repo.setEmbedding(id, new Uint8Array(8), 'm');
+    await repo.setEmbedding(id, new Uint8Array(8), 'm', (await repo.listItems())[0]!.updatedAt);
     expect(await repo.staleEmbeddings('m')).toEqual([]);
     expect(await repo.listEmbeddings('m')).toHaveLength(1);
     expect(await repo.staleEmbeddings('other')).toEqual([id]);
     await repo.updateItem(id, { notes: 'Bosch' });
     expect(await repo.staleEmbeddings('m')).toEqual([id]);
     expect(await repo.listEmbeddings('m')).toHaveLength(0);
+  });
+
+  it('keeps an embedding stale if the item changed while it was being made', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Drill' });
+    const readAt = (await repo.listItems())[0]!.updatedAt;
+    await repo.updateItem(id, { notes: 'edited mid-embedding' });
+    await repo.setEmbedding(id, new Uint8Array(8), 'm', readAt);
+    expect(await repo.staleEmbeddings('m')).toEqual([id]);
+  });
+
+  it('marks everything inside a renamed, moved, merged or deleted place stale', async () => {
+    const { repo } = await testRepo();
+    const embedAll = async () => {
+      for (const it of await repo.listItems()) await repo.setEmbedding(it.id, new Uint8Array(4), 'm', it.updatedAt);
+      expect(await repo.staleEmbeddings('m')).toEqual([]);
+    };
+    const shed = await repo.ensureLocationPath(['Shed']);
+    const box = await repo.ensureLocationPath(['Shed', 'Blue box']);
+    const attic = await repo.ensureLocationPath(['Attic']);
+    const drill = await repo.addItem({ name: 'Drill', locationId: box });
+    const tent = await repo.addItem({ name: 'Tent', locationId: attic });
+
+    await embedAll();
+    await repo.renameLocation(shed, 'Garage');
+    expect(await repo.staleEmbeddings('m')).toEqual([drill]);
+
+    await embedAll();
+    await repo.setLocationParent(box, attic);
+    expect(await repo.staleEmbeddings('m')).toEqual([drill]);
+
+    await embedAll();
+    await repo.deleteLocation(attic);
+    expect((await repo.staleEmbeddings('m')).sort()).toEqual([drill, tent].sort());
+  });
+});
+
+describe('concurrency', () => {
+  it('runs overlapping actions one at a time, so none lands inside another transaction', async () => {
+    const { repo } = await testRepo();
+    const garage = await repo.ensureLocationPath(['Garage']);
+    const drill = await repo.addItem({ name: 'Drill', locationId: garage });
+    // All fired together, as when a save, a settings write and an embedding race on a phone.
+    await Promise.all([
+      repo.addItem({ name: 'Tent', placeNames: ['Attic', 'Suitcase'] }),
+      repo.setSetting('device.x', '1'),
+      repo.moveItem(drill, null),
+      repo.setEmbedding(drill, new Uint8Array(4), 'm', 0),
+      repo.renameLocation(garage, 'Shed'),
+      repo.lendItem(drill, { person: 'Sam' }),
+      repo.addItem({ name: 'Saw', locationId: garage }),
+    ]);
+    const items = await repo.listItems();
+    expect(items.map((i) => i.name).sort()).toEqual(['Drill', 'Saw', 'Tent']);
+    expect(await repo.getSetting('device.x')).toBe('1');
+  });
+
+  it('a failing action rolls back only its own writes', async () => {
+    const { repo } = await testRepo();
+    await Promise.all([
+      repo.addItem({ name: 'Tent', placeNames: ['Garage', 'x'.repeat(500)] }).catch(() => null),
+      repo.setSetting('device.y', '2'),
+    ]);
+    expect(await repo.getSetting('device.y')).toBe('2');
+    expect(await repo.listItems()).toEqual([]);
+  });
+});
+
+describe('item covers', () => {
+  it('loads one cover thumbnail per item and follows photo changes', async () => {
+    const { repo } = await testRepo();
+    const id = await repo.addItem({ name: 'Stove' });
+    const photo = (thumb: string) => ({ data: 'full', thumb, width: 1, height: 1 });
+    const first = await repo.addPhoto({ itemId: id }, photo('first'));
+    await repo.addPhoto({ itemId: id }, photo('second'));
+    let item = (await repo.listItems())[0]!;
+    expect(item.cover).toBe('first');
+    expect(item.photoIds).toHaveLength(2);
+    await repo.deletePhoto(first);
+    item = (await repo.listItems())[0]!;
+    expect(item.cover).toBe('second');
+    expect(item.photoIds).toHaveLength(1);
+  });
+
+  it('treats folded names as the same place (ł, ß, accents)', async () => {
+    const { repo } = await testRepo();
+    const a = await repo.ensureLocationPath(['Łazienka']);
+    expect(await repo.ensureLocationPath(['lazienka'])).toBe(a);
+    const b = await repo.ensureLocationPath(['Straße']);
+    expect(await repo.ensureLocationPath(['STRASSE'])).toBe(b);
   });
 });
